@@ -35,6 +35,10 @@ export const th: Record<keyof typeof en, string> = {
   "notify.dependency": "งานที่ต้องทำก่อนของ \"{task}\" เปลี่ยนเป็น {status}",
   "notify.generic_hidden": "คุณมีการแจ้งเตือนที่ไม่สามารถดูได้แล้ว",
 
+  "digest.daily": "รายวัน",
+  "digest.weekly": "รายสัปดาห์",
+  "digest.empty": "ไม่มีอะไรใหม่",
+  "digest.intro": "สรุปความเคลื่อนไหวนับจากสรุปครั้งก่อน:",
   "error.not_found": "ไม่พบข้อมูล",
   "error.forbidden": "คุณไม่มีสิทธิ์ทำรายการนี้",
   "error.unauthenticated": "กรุณาเข้าสู่ระบบ",

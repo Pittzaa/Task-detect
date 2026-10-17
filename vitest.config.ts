@@ -14,6 +14,7 @@ export default defineConfig({
         resolve: { alias },
         test: {
           name: "integration",
+          env: { LOG_LEVEL: "silent" },
           include: ["tests/integration/**/*.test.ts"],
           globalSetup: ["tests/integration/global-setup.ts"],
           fileParallelism: false,

@@ -4,12 +4,15 @@ import type { Permission } from "@/authz/permissions";
 import { projectTeams, projects, teams } from "@/db/schema";
 import type { TenantSession } from "./tenant";
 
+/** The minimum a scope lookup needs; lets background jobs (no acting user) reuse the same code. */
+export type OrgCtx = Pick<TenantSession, "tx" | "orgId">;
+
 /**
  * Authorization scope of a project: itself plus every team and department participating in it.
  * Team/department-scoped role assignments cover the project (and so its tasks) through these ids.
  * Returns null when the project does not exist in this organization (or is deleted).
  */
-export async function projectScope(s: TenantSession, projectId: string): Promise<ResourceScope | null> {
+export async function projectScope(s: OrgCtx, projectId: string): Promise<ResourceScope | null> {
   const [p] = await s.tx
     .select({ id: projects.id })
     .from(projects)
@@ -29,7 +32,7 @@ export async function projectScope(s: TenantSession, projectId: string): Promise
 }
 
 /** Scopes for many projects at once (2 queries). */
-export async function projectScopes(s: TenantSession, projectIds: string[]): Promise<Map<string, ResourceScope>> {
+export async function projectScopes(s: OrgCtx, projectIds: string[]): Promise<Map<string, ResourceScope>> {
   const out = new Map<string, ResourceScope>();
   if (!projectIds.length) return out;
   for (const id of projectIds) out.set(id, { orgId: s.orgId, projectId: id, teamIds: [], departmentIds: [] });

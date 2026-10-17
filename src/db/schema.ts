@@ -657,3 +657,228 @@ export const savedViews = pgTable(
     index("saved_views_org_idx").on(t.orgId, t.scope),
   ],
 );
+
+// ---------------------------------------------------------------------------------------------
+// Background jobs, notifications and integrations (Phase 4)
+// ---------------------------------------------------------------------------------------------
+
+export const jobStatus = pgEnum("job_status", ["pending", "running", "succeeded", "failed", "dead"]);
+export const notificationChannel = pgEnum("notification_channel", ["in_app", "email"]);
+export const digestFrequency = pgEnum("digest_frequency", ["off", "daily", "weekly"]);
+export const deliveryStatus = pgEnum("delivery_status", ["sent", "failed", "skipped"]);
+
+/**
+ * Durable work queue. Postgres is the source of truth for reliability; Vercel Cron only wakes the worker.
+ * Jobs are claimed with `FOR UPDATE SKIP LOCKED` and a lease, so a crashed worker's job is picked up again.
+ */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: id(),
+    // NULL for global maintenance jobs.
+    orgId: uuid("org_id").references(() => organizations.id),
+    kind: text("kind").notNull(),
+    // Identifiers and small parameters only. Never titles, bodies, tokens or URLs.
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    // Idempotency: enqueueing the same key twice creates one job.
+    dedupeKey: text("dedupe_key"),
+    status: jobStatus("status").notNull().default("pending"),
+    runAt: timestamp("run_at", { withTimezone: true }).notNull().defaultNow(),
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(5),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    lockedBy: text("locked_by"),
+    // Sanitized failure class only (never response bodies or secrets).
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("jobs_dedupe_uq").on(t.dedupeKey).where(sql`${t.dedupeKey} is not null`),
+    index("jobs_ready_idx").on(t.runAt).where(sql`${t.status} in ('pending','running')`),
+    index("jobs_org_status_idx").on(t.orgId, t.status),
+  ],
+);
+
+/**
+ * In-app notification. Stores *what happened* (type + identifiers), not text. Text is rendered when the
+ * notification is read, after re-checking that the recipient may still see the task.
+ */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    type: text("type").notNull(),
+    taskId: uuid("task_id"),
+    actorId: uuid("actor_id").references(() => users.id),
+    // Small non-sensitive parameters (for example the new status value, a due date).
+    params: jsonb("params").$type<Record<string, string>>().notNull().default({}),
+    // false when the user turned off in-app delivery for this event but still wants the email.
+    inApp: boolean("in_app").notNull().default(true),
+    // Unique per recipient: processing the same source twice never duplicates a notification.
+    dedupeKey: text("dedupe_key").notNull(),
+    createdAt: createdAt(),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    emailedAt: timestamp("emailed_at", { withTimezone: true }),
+    digestedAt: timestamp("digested_at", { withTimezone: true }),
+  },
+  (t) => [
+    unique("notifications_org_id_uq").on(t.orgId, t.id),
+    foreignKey({ name: "notifications_member_fk", columns: [t.orgId, t.userId], foreignColumns: [memberships.orgId, memberships.userId] }),
+    uniqueIndex("notifications_dedupe_uq").on(t.userId, t.dedupeKey),
+    index("notifications_user_idx").on(t.orgId, t.userId, t.createdAt),
+  ],
+);
+
+/** Per-user, per-channel, per-event switches. A missing row means "use the default" (see src/domain/notifications.ts). */
+export const notificationSettings = pgTable(
+  "notification_settings",
+  {
+    orgId: uuid("org_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    channel: notificationChannel("channel").notNull(),
+    event: text("event").notNull(),
+    enabled: boolean("enabled").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.userId, t.channel, t.event] }),
+    foreignKey({ name: "notification_settings_member_fk", columns: [t.orgId, t.userId], foreignColumns: [memberships.orgId, memberships.userId] }),
+  ],
+);
+
+export const notificationPrefs = pgTable(
+  "notification_prefs",
+  {
+    orgId: uuid("org_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    digest: digestFrequency("digest").notNull().default("off"),
+    // Quiet hours in the user's own time zone, "HH:MM". Email is deferred until they end; in-app is unaffected.
+    quietStart: text("quiet_start"),
+    quietEnd: text("quiet_end"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.userId] }),
+    foreignKey({ name: "notification_prefs_member_fk", columns: [t.orgId, t.userId], foreignColumns: [memberships.orgId, memberships.userId] }),
+    check("notification_prefs_quiet_pair", sql`(${t.quietStart} is null) = (${t.quietEnd} is null)`),
+    check("notification_prefs_quiet_fmt", sql`${t.quietStart} is null or (${t.quietStart} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$' and ${t.quietEnd} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$')`),
+  ],
+);
+
+/** One row per delivery try, for observability. Contains no message content. */
+export const deliveryAttempts = pgTable(
+  "delivery_attempts",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull(),
+    channel: text("channel").notNull(),
+    // Notification id for email; destination id for Discord.
+    subjectId: uuid("subject_id").notNull(),
+    status: deliveryStatus("status").notNull(),
+    // Failure class or skip reason, never provider response bodies.
+    detail: text("detail"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("delivery_attempts_subject_idx").on(t.orgId, t.subjectId, t.createdAt)],
+);
+
+export const digestLog = pgTable(
+  "digest_log",
+  {
+    orgId: uuid("org_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    periodKey: text("period_key").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.userId, t.periodKey] })],
+);
+
+/** Discord webhook destination for exactly one team or one project. The URL is stored encrypted. */
+export const integrationDestinations = pgTable(
+  "integration_destinations",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    teamId: uuid("team_id"),
+    projectId: uuid("project_id"),
+    name: text("name").notNull(),
+    // AES-256-GCM envelope bound to this row's id; never returned to clients.
+    webhookCiphertext: text("webhook_ciphertext").notNull(),
+    // Last 4 characters of the webhook token, so admins can tell destinations apart.
+    webhookHint: text("webhook_hint").notNull(),
+    events: text("events").array().notNull(),
+    // false (default): messages carry no task titles. true: an admin accepted that everyone in the channel sees titles.
+    includeDetails: boolean("include_details").notNull().default(false),
+    enabled: boolean("enabled").notNull().default(true),
+    disabledReason: text("disabled_reason"),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    lastStatus: text("last_status"),
+    lastDeliveryAt: timestamp("last_delivery_at", { withTimezone: true }),
+    createdBy: uuid("created_by").notNull().references(() => users.id),
+    createdAt: createdAt(),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+    deletedAt: deletedAt(),
+  },
+  (t) => [
+    unique("integration_destinations_org_id_uq").on(t.orgId, t.id),
+    foreignKey({ name: "integration_destinations_team_fk", columns: [t.orgId, t.teamId], foreignColumns: [teams.orgId, teams.id] }),
+    foreignKey({ name: "integration_destinations_project_fk", columns: [t.orgId, t.projectId], foreignColumns: [projects.orgId, projects.id] }),
+    check("integration_destinations_one_target", sql`(${t.teamId} is not null) <> (${t.projectId} is not null)`),
+    check("integration_destinations_name_len", sql`char_length(${t.name}) between 1 and 80`),
+  ],
+);
+
+/** A user's Google Calendar link. Only the refresh token is kept, encrypted. Sync is one-way (app -> Google). */
+export const calendarConnections = pgTable(
+  "calendar_connections",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    refreshTokenCiphertext: text("refresh_token_ciphertext").notNull(),
+    scope: text("scope").notNull(),
+    calendarId: text("calendar_id").notNull().default("primary"),
+    status: text("status").notNull().default("active"),
+    lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("calendar_connections_org_id_uq").on(t.orgId, t.id),
+    foreignKey({ name: "calendar_connections_member_fk", columns: [t.orgId, t.userId], foreignColumns: [memberships.orgId, memberships.userId] }),
+    uniqueIndex("calendar_connections_user_uq").on(t.orgId, t.userId),
+    check("calendar_connections_status", sql`${t.status} in ('active','revoked','error','disconnecting')`),
+  ],
+);
+
+export const calendarEventLinks = pgTable(
+  "calendar_event_links",
+  {
+    orgId: uuid("org_id").notNull(),
+    connectionId: uuid("connection_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    // Deterministic id derived from (connection, task): creating twice cannot produce two events.
+    googleEventId: text("google_event_id").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+    failures: integer("failures").notNull().default(0),
+    lastError: text("last_error"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.connectionId, t.taskId] }),
+    foreignKey({ name: "calendar_event_links_connection_fk", columns: [t.orgId, t.connectionId], foreignColumns: [calendarConnections.orgId, calendarConnections.id] }),
+    foreignKey({ name: "calendar_event_links_task_fk", columns: [t.orgId, t.taskId], foreignColumns: [tasks.orgId, tasks.id] }),
+    index("calendar_event_links_task_idx").on(t.orgId, t.taskId),
+  ],
+);
+
+/** Short-lived OAuth state + PKCE verifier for the calendar connect flow. */
+export const oauthStates = pgTable("oauth_states", {
+  stateHash: text("state_hash").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  orgId: uuid("org_id").notNull().references(() => organizations.id),
+  codeVerifierCiphertext: text("code_verifier_ciphertext").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});

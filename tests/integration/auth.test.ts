@@ -6,7 +6,7 @@ import { GET as myMemberships } from "@/app/api/me/memberships/route";
 import { POST as accessRequest } from "@/app/api/access-requests/route";
 import { GET as listMembersRoute } from "@/app/api/orgs/[orgId]/members/route";
 import { addMember, connect, makeOrg, makeUser } from "./helpers";
-import { BASE, Client, PASSWORD, linkIn, makeAuthApp, registerAndSignIn } from "./auth-helpers";
+import { Client, PASSWORD, linkIn, makeAuthApp, registerAndSignIn } from "./auth-helpers";
 import { setRuntimeForTests } from "@/server/runtime";
 
 const c = connect();
@@ -153,7 +153,7 @@ describe("rate limiting", () => {
     expect(statuses.slice(0, 5).every((s) => s !== 429)).toBe(true);
     expect(statuses.slice(5)).toContain(429);
     } finally {
-      setRuntimeForTests({ db: c.app, auth: app.auth, email: app.email, store: app.store, appUrl: BASE }); // restore the shared runtime
+      setRuntimeForTests(app.runtime); // restore the shared runtime
     }
   });
 });

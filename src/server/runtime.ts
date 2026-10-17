@@ -4,6 +4,8 @@ import { createLogSender, createResendSender, type EmailSender } from "@/integra
 import { createBlobStore } from "@/integrations/storage/blob";
 import { createFsStore } from "@/integrations/storage/fs";
 import type { ObjectStore } from "@/integrations/storage";
+import { createGoogleClient, type GoogleClient } from "@/integrations/google-calendar";
+import type { JobContext } from "@/jobs/worker";
 import { createAuth, type Auth } from "./auth";
 
 export interface Runtime {
@@ -12,6 +14,10 @@ export interface Runtime {
   email: EmailSender;
   store: ObjectStore;
   appUrl: string;
+  /** Current encryption key first. Empty when APP_ENCRYPTION_KEY is not configured (secrets features then refuse to run). */
+  encryptionKeys: string[];
+  google?: GoogleClient;
+  jobContext(): JobContext;
 }
 
 const KEY = Symbol.for("task-tracker.runtime");
@@ -42,8 +48,16 @@ export function getRuntime(): Runtime {
     : env.NODE_ENV === "production"
       ? unavailableStore()
       : createFsStore(".data/uploads");
-  g[KEY] = { db, auth, email, store, appUrl: env.APP_URL };
-  return g[KEY]!;
+  const encryptionKeys = [env.APP_ENCRYPTION_KEY, env.APP_ENCRYPTION_KEY_PREVIOUS].filter((k): k is string => !!k);
+  const googleCfg = env.GOOGLE_CALENDAR_CLIENT_ID && env.GOOGLE_CALENDAR_CLIENT_SECRET
+    ? { clientId: env.GOOGLE_CALENDAR_CLIENT_ID, clientSecret: env.GOOGLE_CALENDAR_CLIENT_SECRET, redirectUri: `${env.APP_URL}/api/calendar/callback` }
+    : undefined;
+  const rt: Runtime = {
+    db, auth, email, store, appUrl: env.APP_URL, encryptionKeys, google: googleCfg ? createGoogleClient(googleCfg) : undefined,
+    jobContext: () => ({ db, email, appUrl: env.APP_URL, encryptionKeys, fetchImpl: fetch, google: googleCfg, now: () => new Date() }),
+  };
+  g[KEY] = rt;
+  return rt;
 }
 
 /** Test seam: install a prebuilt runtime. */

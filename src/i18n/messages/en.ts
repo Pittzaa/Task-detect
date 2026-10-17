@@ -34,6 +34,10 @@ export const en = {
   "notify.dependency": "A prerequisite of \"{task}\" changed to {status}",
   "notify.generic_hidden": "You have an update you can no longer view",
 
+  "digest.daily": "daily",
+  "digest.weekly": "weekly",
+  "digest.empty": "Nothing new",
+  "digest.intro": "Here is what happened since your last digest:",
   "error.not_found": "Not found",
   "error.forbidden": "You do not have permission to do that",
   "error.unauthenticated": "Please sign in",

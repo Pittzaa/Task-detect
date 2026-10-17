@@ -206,6 +206,7 @@ export async function updateTask(s: TenantSession, taskId: string, input: Update
   if (!row) throw conflict("The task was changed by someone else. Reload and try again.");
   await activity(s, task.id, "updated", changes);
   await audit(s, "task.update", task.id, { fields: Object.keys(changes) });
+  await emit(s, "task.updated", { taskId: task.id, actorId: s.userId, fields: Object.keys(changes) });
   if (changes.priority) await emit(s, "task.priority_changed", { taskId: task.id, actorId: s.userId, to: patch.priority });
   if (changes.dueDate !== undefined) await emit(s, "task.due_changed", { taskId: task.id, actorId: s.userId });
   return row;
@@ -359,6 +360,7 @@ export async function restoreTask(s: TenantSession, taskId: string) {
   }
   await activity(s, task.id, "restored");
   await audit(s, "task.restore", task.id);
+  await emit(s, "task.restored", { taskId: task.id, actorId: s.userId });
   return { restored: 1 + restorable.length };
 }
 
