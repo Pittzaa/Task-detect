@@ -23,7 +23,7 @@ export function connect() {
 }
 
 export async function makeOrg(admin: Db, name = "Org") {
-  const [org] = await admin.insert(organizations).values({ name, slug: `${name}-${randomUUID()}` }).returning();
+  const [org] = await admin.insert(organizations).values({ name, slug: `${name.toLowerCase()}-${randomUUID()}` }).returning();
   const [dept] = await admin.insert(departments).values({ orgId: org!.id, name: `${name} Dept` }).returning();
   const [team] = await admin.insert(teams).values({ orgId: org!.id, departmentId: dept!.id, name: `${name} Team` }).returning();
   const [project] = await admin.insert(projects).values({ orgId: org!.id, name: `${name} Project` }).returning();

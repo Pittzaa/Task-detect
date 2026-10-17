@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
+  integer,
   check,
   foreignKey,
   index,
@@ -37,6 +39,10 @@ export const users = pgTable(
     id: id(),
     email: text("email").notNull(),
     name: text("name").notNull(),
+    emailVerified: boolean("email_verified").notNull().default(false),
+    image: text("image"),
+    twoFactorEnabled: boolean("two_factor_enabled").default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     locale: locale("locale").notNull().default("th"),
     // IANA time zone name, validated in the application layer.
     timezone: text("timezone").notNull().default("Asia/Bangkok"),
@@ -193,9 +199,11 @@ export const invitations = pgTable(
     id: id(),
     orgId: uuid("org_id").notNull().references(() => organizations.id),
     email: text("email").notNull(),
+    roleId: uuid("role_id").notNull().references(() => roles.id),
     // Only a hash of the token is stored.
     tokenHash: text("token_hash").notNull().unique(),
-    invitedBy: uuid("invited_by").notNull().references(() => users.id),
+    // NULL for the bootstrap invitation created by an operator (no inviting user exists yet).
+    invitedBy: uuid("invited_by").references(() => users.id),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
@@ -219,3 +227,84 @@ export const auditLogs = pgTable(
   },
   (t) => [index("audit_logs_org_created_idx").on(t.orgId, t.createdAt)],
 );
+
+// ---------------------------------------------------------------------------------------------
+// Authentication tables (managed through Better Auth). JS property names must match Better Auth's
+// field names. These tables are not tenant-scoped; access is always through the auth layer.
+// ---------------------------------------------------------------------------------------------
+
+export const authSessions = pgTable(
+  "auth_sessions",
+  {
+    id: id(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    token: text("token").notNull().unique(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  },
+  (t) => [index("auth_sessions_user_idx").on(t.userId)],
+);
+
+export const authAccounts = pgTable(
+  "auth_accounts",
+  {
+    id: id(),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
+    scope: text("scope"),
+    password: text("password"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("auth_accounts_user_idx").on(t.userId), unique("auth_accounts_provider_uq").on(t.providerId, t.accountId)],
+);
+
+export const authVerifications = pgTable(
+  "auth_verifications",
+  {
+    id: id(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("auth_verifications_identifier_idx").on(t.identifier)],
+);
+
+export const authTwoFactor = pgTable(
+  "auth_two_factor",
+  {
+    id: id(),
+    secret: text("secret").notNull(),
+    backupCodes: text("backup_codes").notNull(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    verified: boolean("verified").default(true),
+    failedVerificationCount: integer("failed_verification_count").default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  },
+  (t) => [index("auth_two_factor_user_idx").on(t.userId)],
+);
+
+export const authRateLimits = pgTable("auth_rate_limits", {
+  id: id(),
+  key: text("key").notNull().unique(),
+  count: integer("count").notNull(),
+  lastRequest: bigint("last_request", { mode: "number" }).notNull(),
+});
+
+/** Fixed-window limiter for application endpoints (Better Auth limits its own routes). */
+export const appRateLimits = pgTable("app_rate_limits", {
+  key: text("key").primaryKey(),
+  windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+  count: integer("count").notNull(),
+});

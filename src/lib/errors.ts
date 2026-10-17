@@ -1,4 +1,4 @@
-export type ErrorCode = "NOT_FOUND" | "FORBIDDEN" | "UNAUTHENTICATED" | "VALIDATION" | "CONFLICT";
+export type ErrorCode = "NOT_FOUND" | "FORBIDDEN" | "UNAUTHENTICATED" | "VALIDATION" | "CONFLICT" | "RATE_LIMITED";
 
 export class AppError extends Error {
   constructor(
@@ -19,3 +19,4 @@ export const forbidden = (detail?: Record<string, string>) => new AppError("FORB
 export const notFound = () => new AppError("NOT_FOUND", "Not found", 404);
 export const validation = (message: string) => new AppError("VALIDATION", message, 422);
 export const conflict = (message: string) => new AppError("CONFLICT", message, 409);
+export const rateLimited = () => new AppError("RATE_LIMITED", "Too many requests", 429);
