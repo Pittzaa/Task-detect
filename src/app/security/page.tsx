@@ -12,13 +12,15 @@ interface SessionRow { token: string; id: string; userAgent?: string | null; ipA
 interface SessionInfo { session: { token: string }; user: { twoFactorEnabled?: boolean | null } }
 
 export default function SecurityPage() {
-  const { t, err, locale } = useI18n();
+  const { t, err, locale, setTimezone } = useI18n();
   const router = useRouter();
   const toast = useToast();
   const me = useQuery("me", () => api<{ name: string; email: string; locale: "th" | "en"; timezone: string }>("/api/me"));
   const info = useQuery("session", () => authApi<SessionInfo | null>("/get-session"));
   const sessions = useQuery("sessions", () => authApi<SessionRow[]>("/list-sessions"));
   useEffect(() => { if (me.error?.status === 401) router.replace("/login?next=/security"); }, [me.error, router]);
+  const profileZone = me.data?.timezone;
+  useEffect(() => { if (profileZone) setTimezone(profileZone); }, [profileZone, setTimezone]);
 
   // two-factor enrolment
   const [password, setPassword] = useState("");

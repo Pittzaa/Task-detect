@@ -9,6 +9,8 @@ interface Ctx {
   timezone: string;
   t: (key: MessageKey, vars?: Record<string, string | number>) => string;
   setLocale: (l: Locale) => Promise<void>;
+  /** Applies the signed-in user's profile time zone (used for "today", overdue and times). Display only; nothing is persisted. */
+  setTimezone: (tz: string) => void;
   date: (d: string) => string;
   instant: (d: Date | string) => string;
   /** Localized message for an API error (stable codes map to dictionary keys). */
@@ -17,8 +19,12 @@ interface Ctx {
 
 const I18n = createContext<Ctx | null>(null);
 
-export function I18nProvider({ children, initialLocale = "th", timezone = "Asia/Bangkok" }: { children: ReactNode; initialLocale?: Locale; timezone?: string }) {
+export function I18nProvider({ children, initialLocale = "th", timezone: initialTimezone = "Asia/Bangkok" }: { children: ReactNode; initialLocale?: Locale; timezone?: string }) {
   const [locale, setLocaleState] = useState<Locale>(initialLocale);
+  const [timezone, setTimezoneState] = useState(initialTimezone);
+  const setTimezone = useCallback((tz: string) => {
+    try { new Intl.DateTimeFormat("en", { timeZone: tz }); setTimezoneState(tz); } catch { /* unknown zone: keep the current one */ }
+  }, []);
   useEffect(() => {
     document.documentElement.lang = locale;
     document.cookie = `tt_locale=${locale}; path=/; max-age=31536000; samesite=lax`;
@@ -42,7 +48,7 @@ export function I18nProvider({ children, initialLocale = "th", timezone = "Asia/
     return translate(locale, "error.generic");
   }, [locale]);
 
-  const value = useMemo<Ctx>(() => ({ locale, timezone, t, setLocale, err, date: (d) => fmtDate(d, locale), instant: (d) => fmtInstant(typeof d === "string" ? new Date(d) : d, locale, timezone) }), [locale, timezone, t, setLocale, err]);
+  const value = useMemo<Ctx>(() => ({ locale, timezone, t, setLocale, setTimezone, err, date: (d) => fmtDate(d, locale), instant: (d) => fmtInstant(typeof d === "string" ? new Date(d) : d, locale, timezone) }), [locale, timezone, t, setLocale, setTimezone, err]);
   return <I18n.Provider value={value}>{children}</I18n.Provider>;
 }
 

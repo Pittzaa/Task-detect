@@ -11,14 +11,16 @@ import { useI18n } from "@/ui/i18n";
 interface Membership { membershipId: string; status: "pending" | "approved" | "suspended" | "revoked"; org: { id: string; name: string; slug: string } | null }
 
 export default function Home() {
-  const { t, setLocale } = useI18n();
+  const { t, setLocale, setTimezone } = useI18n();
   const router = useRouter();
-  const me = useQuery("me", () => api<{ locale: "th" | "en" }>("/api/me"));
+  const me = useQuery("me", () => api<{ locale: "th" | "en"; timezone: string }>("/api/me"));
   const mem = useQuery(me.data ? "memberships" : null, () => api<{ memberships: Membership[] }>("/api/me/memberships"));
 
   useEffect(() => { if (me.error?.status === 401) router.replace("/login"); }, [me.error, router]);
   const profileLocale = me.data?.locale;
   useEffect(() => { if (profileLocale) void setLocale(profileLocale).catch(() => undefined); }, [profileLocale, setLocale]);
+  const profileZone = me.data?.timezone;
+  useEffect(() => { if (profileZone) setTimezone(profileZone); }, [profileZone, setTimezone]);
   const approved = useMemo(() => mem.data?.memberships.filter((m) => m.status === "approved" && m.org) ?? [], [mem.data]);
   useEffect(() => { if (approved.length === 1) router.replace(`/o/${approved[0]!.org!.id}/my-tasks`); }, [approved, router]);
 

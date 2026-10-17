@@ -18,7 +18,7 @@ import { TaskDrawer } from "@/ui/tasks/task-drawer";
 import { TimelineView } from "@/ui/tasks/timeline-view";
 
 function TasksPage() {
-  const { orgId } = useOrg();
+  const { orgId, can } = useOrg();
   const { t, err } = useI18n();
   const toast = useToast();
   const router = useRouter();
@@ -55,7 +55,7 @@ function TasksPage() {
         <h1 style={{ margin: 0 }}>{t("ui.tasks")}</h1>
         <div className="row">
           <SavedViews filters={filters} onApply={(f) => go(f)} />
-          <Btn kind="primary" onClick={() => setCreating(true)} disabled={projectList.length === 0}>+ {t("ui.new_task")}</Btn>
+          <Btn kind="primary" onClick={() => setCreating(true)} disabled={projectList.length === 0 || !can.createTask}>+ {t("ui.new_task")}</Btn>
         </div>
       </div>
       {deleted && <Notice kind="warn">{t("ui.delete_task")} <Btn small onClick={() => void undo()}>{t("ui.restore")}</Btn></Notice>}

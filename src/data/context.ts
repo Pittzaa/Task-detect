@@ -26,8 +26,11 @@ export async function getContext(s: TenantSession) {
   const [org] = await s.tx.select({ id: organizations.id, name: organizations.name }).from(organizations).where(eq(organizations.id, s.orgId));
   if (!org) throw notFound();
   const flags = Object.fromEntries(Object.entries(UI_FLAGS).map(([k, p]) => [k, can(s.principal, p, { orgId: s.orgId })]));
+  // Scoped roles (a team or project) can create tasks without any organization-wide grant, so this is "anywhere", not "org level".
+  const createsSomewhere = s.principal.assignments.some((a) => a.permissions.has("task.create"));
   const readsSomething = s.principal.assignments.some((a) => a.permissions.has("task.read"));
-  return { org, can: flags, hasAnyAccess: readsSomething };
+  const flagsOut: Record<string, boolean> = { ...flags, createTask: createsSomewhere };
+  return { org, can: flagsOut, hasAnyAccess: readsSomething };
 }
 
 /** Colleagues who can currently read a project; used by assignee and mention pickers. Names only. */
