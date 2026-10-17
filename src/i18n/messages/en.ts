@@ -47,6 +47,7 @@ export const en = {
   "val.status_transition": "Cannot move from {from} to {to}",
   "val.dependency_cycle": "This would create a circular dependency",
   "val.dependency_blocked": "Prerequisite tasks must be done first",
+  "val.parent_incomplete": "All subtasks must be done or cancelled first",
   "val.parent_cycle": "A task cannot be its own ancestor",
 
   "ui.signin": "Sign in",

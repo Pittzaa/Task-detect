@@ -48,6 +48,7 @@ export const th: Record<keyof typeof en, string> = {
   "val.status_transition": "ไม่สามารถเปลี่ยนจาก {from} เป็น {to}",
   "val.dependency_cycle": "การตั้งค่านี้จะทำให้เกิดการพึ่งพากันเป็นวงกลม",
   "val.dependency_blocked": "ต้องทำงานที่เป็นต้นทางให้เสร็จก่อน",
+  "val.parent_incomplete": "ต้องทำงานย่อยให้เสร็จหรือยกเลิกก่อน",
   "val.parent_cycle": "งานไม่สามารถเป็นงานต้นทางของตัวเองได้",
 
   "ui.signin": "เข้าสู่ระบบ",

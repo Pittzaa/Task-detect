@@ -4,6 +4,7 @@ import {
   boolean,
   integer,
   check,
+  date,
   foreignKey,
   index,
   jsonb,
@@ -20,6 +21,8 @@ import {
 export const membershipStatus = pgEnum("membership_status", ["pending", "approved", "suspended", "revoked"]);
 export const scopeType = pgEnum("scope_type", ["organization", "department", "team", "project"]);
 export const locale = pgEnum("locale", ["th", "en"]);
+export const taskStatus = pgEnum("task_status", ["todo", "progress", "review", "done", "cancelled", "blocked"]);
+export const taskPriority = pgEnum("task_priority", ["low", "medium", "high", "urgent"]);
 
 const id = () => uuid("id").primaryKey().default(sql`gen_random_uuid()`);
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -308,3 +311,222 @@ export const appRateLimits = pgTable("app_rate_limits", {
   windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
   count: integer("count").notNull(),
 });
+
+// ---------------------------------------------------------------------------------------------
+// Work management (Phase 2)
+// ---------------------------------------------------------------------------------------------
+
+export const labels = pgTable(
+  "labels",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    name: text("name").notNull(),
+    color: text("color").notNull().default("#64748b"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("labels_org_id_uq").on(t.orgId, t.id),
+    uniqueIndex("labels_org_name_uq").on(t.orgId, sql`lower(${t.name})`),
+    check("labels_color_hex", sql`${t.color} ~ '^#[0-9a-fA-F]{6}$'`),
+  ],
+);
+
+/**
+ * `start_date`/`due_date` are calendar dates (no time, no zone). `completed_at` is a UTC instant.
+ * Workflow rules (status transitions, dependency gating) are enforced in the service layer; the
+ * constraints below are the last line of defence for shape and integrity.
+ */
+export const tasks = pgTable(
+  "tasks",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    projectId: uuid("project_id").notNull(),
+    parentId: uuid("parent_id"),
+    // Set for occurrences generated from a recurring series (Phase 3).
+    seriesId: uuid("series_id"),
+    occurrenceDate: date("occurrence_date"),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    status: taskStatus("status").notNull().default("todo"),
+    priority: taskPriority("priority").notNull().default("medium"),
+    startDate: date("start_date"),
+    dueDate: date("due_date"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    // Remind N days before the due date (09:00 in the assignee's time zone). NULL = no reminder.
+    reminderDaysBefore: integer("reminder_days_before"),
+    primaryAssigneeId: uuid("primary_assignee_id"),
+    version: integer("version").notNull().default(1),
+    createdBy: uuid("created_by").notNull().references(() => users.id),
+    updatedBy: uuid("updated_by").references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: deletedAt(),
+    deletedBy: uuid("deleted_by").references(() => users.id),
+  },
+  (t) => [
+    unique("tasks_org_id_uq").on(t.orgId, t.id),
+    foreignKey({ name: "tasks_project_fk", columns: [t.orgId, t.projectId], foreignColumns: [projects.orgId, projects.id] }),
+    foreignKey({ name: "tasks_parent_fk", columns: [t.orgId, t.parentId], foreignColumns: [t.orgId, t.id] }),
+    foreignKey({ name: "tasks_assignee_fk", columns: [t.orgId, t.primaryAssigneeId], foreignColumns: [memberships.orgId, memberships.userId] }),
+    check("tasks_title_len", sql`char_length(${t.title}) between 1 and 300`),
+    check("tasks_description_len", sql`char_length(${t.description}) <= 20000`),
+    check("tasks_date_range", sql`${t.startDate} is null or ${t.dueDate} is null or ${t.dueDate} >= ${t.startDate}`),
+    check("tasks_not_own_parent", sql`${t.parentId} is null or ${t.parentId} <> ${t.id}`),
+    check("tasks_completed_iff_done", sql`(${t.status} = 'done') = (${t.completedAt} is not null)`),
+    check("tasks_reminder_range", sql`${t.reminderDaysBefore} is null or ${t.reminderDaysBefore} between 0 and 30`),
+    uniqueIndex("tasks_series_occurrence_uq").on(t.seriesId, t.occurrenceDate).where(sql`${t.seriesId} is not null`),
+    index("tasks_project_status_idx").on(t.orgId, t.projectId, t.status).where(sql`${t.deletedAt} is null`),
+    index("tasks_assignee_idx").on(t.orgId, t.primaryAssigneeId, t.status).where(sql`${t.deletedAt} is null`),
+    index("tasks_due_idx").on(t.orgId, t.dueDate).where(sql`${t.deletedAt} is null`),
+    index("tasks_parent_idx").on(t.orgId, t.parentId),
+  ],
+);
+
+export const taskAssignees = pgTable(
+  "task_assignees",
+  {
+    orgId: uuid("org_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.taskId, t.userId] }),
+    foreignKey({ name: "task_assignees_task_fk", columns: [t.orgId, t.taskId], foreignColumns: [tasks.orgId, tasks.id] }),
+    foreignKey({ name: "task_assignees_member_fk", columns: [t.orgId, t.userId], foreignColumns: [memberships.orgId, memberships.userId] }),
+    index("task_assignees_user_idx").on(t.orgId, t.userId),
+  ],
+);
+
+/** `taskId` cannot start until `dependsOnId` is done (see docs/WORKFLOW.md). */
+export const taskDependencies = pgTable(
+  "task_dependencies",
+  {
+    orgId: uuid("org_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    dependsOnId: uuid("depends_on_id").notNull(),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.taskId, t.dependsOnId] }),
+    foreignKey({ name: "task_dependencies_task_fk", columns: [t.orgId, t.taskId], foreignColumns: [tasks.orgId, tasks.id] }),
+    foreignKey({ name: "task_dependencies_prereq_fk", columns: [t.orgId, t.dependsOnId], foreignColumns: [tasks.orgId, tasks.id] }),
+    check("task_dependencies_not_self", sql`${t.taskId} <> ${t.dependsOnId}`),
+    index("task_dependencies_prereq_idx").on(t.orgId, t.dependsOnId),
+  ],
+);
+
+export const taskLabels = pgTable(
+  "task_labels",
+  {
+    orgId: uuid("org_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    labelId: uuid("label_id").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.taskId, t.labelId] }),
+    foreignKey({ name: "task_labels_task_fk", columns: [t.orgId, t.taskId], foreignColumns: [tasks.orgId, tasks.id] }),
+    foreignKey({ name: "task_labels_label_fk", columns: [t.orgId, t.labelId], foreignColumns: [labels.orgId, labels.id] }),
+  ],
+);
+
+export const comments = pgTable(
+  "comments",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    authorId: uuid("author_id").notNull().references(() => users.id),
+    // Plain text. Never rendered as HTML.
+    body: text("body").notNull(),
+    createdAt: createdAt(),
+    editedAt: timestamp("edited_at", { withTimezone: true }),
+    deletedAt: deletedAt(),
+  },
+  (t) => [
+    unique("comments_org_id_uq").on(t.orgId, t.id),
+    foreignKey({ name: "comments_task_fk", columns: [t.orgId, t.taskId], foreignColumns: [tasks.orgId, tasks.id] }),
+    check("comments_body_len", sql`char_length(${t.body}) between 1 and 10000`),
+    index("comments_task_idx").on(t.orgId, t.taskId, t.createdAt),
+  ],
+);
+
+export const commentMentions = pgTable(
+  "comment_mentions",
+  {
+    orgId: uuid("org_id").notNull(),
+    commentId: uuid("comment_id").notNull(),
+    userId: uuid("user_id").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.commentId, t.userId] }),
+    foreignKey({ name: "comment_mentions_comment_fk", columns: [t.orgId, t.commentId], foreignColumns: [comments.orgId, comments.id] }),
+    foreignKey({ name: "comment_mentions_member_fk", columns: [t.orgId, t.userId], foreignColumns: [memberships.orgId, memberships.userId] }),
+  ],
+);
+
+/** Append-only history of a task. Records which fields changed (and scalar values), never descriptions or comment text. */
+export const taskActivity = pgTable(
+  "task_activity",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    actorId: uuid("actor_id").references(() => users.id),
+    type: text("type").notNull(),
+    changes: jsonb("changes").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    foreignKey({ name: "task_activity_task_fk", columns: [t.orgId, t.taskId], foreignColumns: [tasks.orgId, tasks.id] }),
+    index("task_activity_task_idx").on(t.orgId, t.taskId, t.createdAt),
+  ],
+);
+
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    uploadedBy: uuid("uploaded_by").notNull().references(() => users.id),
+    // Opaque server-generated key; never derived from the user's file name.
+    storageKey: text("storage_key").notNull().unique(),
+    // Display-only, sanitized.
+    filename: text("filename").notNull(),
+    // Detected by the server from file contents, not taken from the client.
+    contentType: text("content_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    sha256: text("sha256").notNull(),
+    createdAt: createdAt(),
+    deletedAt: deletedAt(),
+  },
+  (t) => [
+    unique("attachments_org_id_uq").on(t.orgId, t.id),
+    foreignKey({ name: "attachments_task_fk", columns: [t.orgId, t.taskId], foreignColumns: [tasks.orgId, tasks.id] }),
+    check("attachments_size", sql`${t.sizeBytes} > 0`),
+    index("attachments_task_idx").on(t.orgId, t.taskId),
+  ],
+);
+
+/**
+ * Transactional outbox: services append an event in the same transaction as the change. A background
+ * job later turns events into notifications, re-checking permissions at delivery time. Payloads hold
+ * identifiers only, never titles or text.
+ */
+export const outboxEvents = pgTable(
+  "outbox_events",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    type: text("type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+  },
+  (t) => [index("outbox_events_pending_idx").on(t.createdAt).where(sql`${t.processedAt} is null`)],
+);

@@ -33,6 +33,9 @@ export const PERMISSIONS = [
   "task.change_status",
   "task.manage_dependencies",
   "task.comment",
+  "task.reopen",
+  "task.attach",
+  "label.manage",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -48,6 +51,7 @@ const MEMBER: Permission[] = [
   "task.update",
   "task.change_status",
   "task.comment",
+  "task.attach",
 ];
 
 const MANAGER: Permission[] = [
@@ -59,6 +63,8 @@ const MANAGER: Permission[] = [
   "project.update",
   "project.manage_members",
   "team.manage_members",
+  "task.reopen",
+  "label.manage",
 ];
 
 /**

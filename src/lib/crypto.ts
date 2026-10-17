@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
-export const sha256Hex = (value: string) => createHash("sha256").update(value).digest("hex");
+export const sha256Hex = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
 
 /** URL-safe random token (default 256 bits). Only its hash is ever stored. */
 export const randomToken = (bytes = 32) => randomBytes(bytes).toString("base64url");

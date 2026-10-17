@@ -29,6 +29,20 @@
       "when": 1792255182670,
       "tag": "0003_rls_auth_flows",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792255932871,
+      "tag": "0004_work_management",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792255933789,
+      "tag": "0005_work_management_rls",
+      "breakpoints": true
     }
   ]
 }

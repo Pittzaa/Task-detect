@@ -21,7 +21,7 @@ async function setContext(tx: Tx, userId: string, orgId: string | null) {
   );
 }
 
-async function loadPrincipal(tx: Tx, userId: string, orgId: string): Promise<Principal | null> {
+export async function loadPrincipal(tx: Tx, userId: string, orgId: string): Promise<Principal | null> {
   const [m] = await tx
     .select({ id: memberships.id, status: memberships.status })
     .from(memberships)

@@ -2,6 +2,10 @@ import { createAuth, type Auth } from "@/server/auth";
 import { createCaptureSender } from "@/integrations/email";
 import { setRuntimeForTests } from "@/server/runtime";
 import type { Db } from "@/db/client";
+import { createFsStore } from "@/integrations/storage/fs";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 export const BASE = "http://localhost:3000";
 export const PASSWORD = "correct-horse-battery-9";
@@ -9,8 +13,9 @@ export const PASSWORD = "correct-horse-battery-9";
 export function makeAuthApp(db: Db, opts: { rateLimit?: boolean } = {}) {
   const email = createCaptureSender();
   const auth: Auth = createAuth({ db, baseURL: BASE, secret: "test-secret-test-secret-test-secret-00", email, rateLimit: opts.rateLimit ?? false });
-  setRuntimeForTests({ db, auth, email, appUrl: BASE });
-  return { auth, email };
+  const store = createFsStore(mkdtempSync(path.join(tmpdir(), "tt-uploads-")));
+  setRuntimeForTests({ db, auth, email, store, appUrl: BASE });
+  return { auth, email, store };
 }
 
 /** Minimal browser-like client: keeps cookies and talks to handlers in-process. */

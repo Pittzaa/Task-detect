@@ -17,6 +17,12 @@ export interface ResourceScope {
   departmentId?: string | null;
   teamId?: string | null;
   projectId?: string | null;
+  /**
+   * A project may be shared by several teams. When set, a team-scope assignment covers the
+   * resource if its team is any of these (and likewise for departments).
+   */
+  teamIds?: readonly string[];
+  departmentIds?: readonly string[];
 }
 
 export interface Principal {
@@ -31,9 +37,9 @@ function covers(a: ResolvedAssignment, r: ResourceScope): boolean {
     case "organization":
       return true;
     case "department":
-      return !!a.departmentId && a.departmentId === r.departmentId;
+      return !!a.departmentId && (a.departmentId === r.departmentId || !!r.departmentIds?.includes(a.departmentId));
     case "team":
-      return !!a.teamId && a.teamId === r.teamId;
+      return !!a.teamId && (a.teamId === r.teamId || !!r.teamIds?.includes(a.teamId));
     case "project":
       return !!a.projectId && a.projectId === r.projectId;
     default:

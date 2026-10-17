@@ -1,12 +1,16 @@
 import { getEnv } from "@/config/env";
 import { createDb, type Db } from "@/db/client";
 import { createLogSender, createResendSender, type EmailSender } from "@/integrations/email";
+import { createBlobStore } from "@/integrations/storage/blob";
+import { createFsStore } from "@/integrations/storage/fs";
+import type { ObjectStore } from "@/integrations/storage";
 import { createAuth, type Auth } from "./auth";
 
 export interface Runtime {
   db: Db;
   auth: Auth;
   email: EmailSender;
+  store: ObjectStore;
   appUrl: string;
 }
 
@@ -32,11 +36,22 @@ export function getRuntime(): Runtime {
     production: env.NODE_ENV === "production",
     rateLimit: env.NODE_ENV !== "test",
   });
-  g[KEY] = { db, auth, email, appUrl: env.APP_URL };
+  // Production must use private Blob storage; the filesystem store is for local development only.
+  const store = env.BLOB_READ_WRITE_TOKEN
+    ? createBlobStore(env.BLOB_READ_WRITE_TOKEN)
+    : env.NODE_ENV === "production"
+      ? unavailableStore()
+      : createFsStore(".data/uploads");
+  g[KEY] = { db, auth, email, store, appUrl: env.APP_URL };
   return g[KEY]!;
 }
 
 /** Test seam: install a prebuilt runtime. */
 export function setRuntimeForTests(rt: Runtime | undefined) {
   (globalThis as G)[KEY] = rt;
+}
+
+function unavailableStore(): ObjectStore {
+  const fail = () => { throw new Error("BLOB_READ_WRITE_TOKEN is not configured; attachments are unavailable"); };
+  return { put: fail, get: fail, delete: fail, list: fail };
 }

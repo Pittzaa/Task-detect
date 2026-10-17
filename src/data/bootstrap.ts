@@ -1,6 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { auditLogs, invitations, organizations, roles, users } from "@/db/schema";
+import { auditLogs, invitations, organizations, users } from "@/db/schema";
 import { randomToken, sha256Hex } from "@/lib/crypto";
 import { syncSystemRoles } from "./system-roles";
 

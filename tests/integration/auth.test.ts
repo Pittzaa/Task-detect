@@ -153,7 +153,7 @@ describe("rate limiting", () => {
     expect(statuses.slice(0, 5).every((s) => s !== 429)).toBe(true);
     expect(statuses.slice(5)).toContain(429);
     } finally {
-      setRuntimeForTests({ db: c.app, auth: app.auth, email: app.email, appUrl: BASE }); // restore the shared runtime
+      setRuntimeForTests({ db: c.app, auth: app.auth, email: app.email, store: app.store, appUrl: BASE }); // restore the shared runtime
     }
   });
 });

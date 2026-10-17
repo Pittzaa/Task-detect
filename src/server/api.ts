@@ -65,7 +65,7 @@ function errorResponse(e: unknown): Response {
   if (e instanceof ZodError) {
     return json({ error: { code: "VALIDATION", message: "Invalid input", issues: e.issues.map((i) => ({ path: i.path.join("."), message: i.message })) } }, 422);
   }
-  if (e instanceof AppError) return json({ error: { code: e.code, message: e.message } }, e.status);
+  if (e instanceof AppError) return json({ error: { code: e.code, message: e.message, ...(e.data ? { data: e.data } : {}) } }, e.status);
   logger.error({ err: e instanceof Error ? e.message : "unknown" }, "unhandled API error");
   return json({ error: { code: "INTERNAL", message: "Internal error" } }, 500);
 }

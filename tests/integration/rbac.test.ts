@@ -53,8 +53,10 @@ describe("server-side RBAC", () => {
       expect(await code(withTenant(c.app, { userId: u.otherAdmin!.id, orgId: O.org.id }, (s) => listProjects(s)))).toBe("NOT_FOUND");
     });
 
-    it("an approved member with no role assignment is denied (deny by default)", async () => {
-      expect(await code(withTenant(c.app, as("norole"), (s) => listProjects(s)))).toBe("FORBIDDEN");
+    it("an approved member with no role assignment sees nothing and can change nothing (deny by default)", async () => {
+      expect(await withTenant(c.app, as("norole"), (s) => listProjects(s))).toEqual([]);
+      expect(await code(withTenant(c.app, as("norole"), (s) => createProject(s, { name: "x" })))).toBe("FORBIDDEN");
+      expect(await code(withTenant(c.app, as("norole"), (s) => getProject(s, O.project.id)))).toBe("NOT_FOUND");
     });
   });
 
@@ -81,9 +83,9 @@ describe("server-side RBAC", () => {
 
   describe("scope limits", () => {
     it("a manager scoped to one team has no org-wide project access", async () => {
-      expect(await code(withTenant(c.app, as("teamMgr"), (s) => listProjects(s)))).toBe("FORBIDDEN");
+      expect(await withTenant(c.app, as("teamMgr"), (s) => listProjects(s))).toEqual([]);
       expect(await code(withTenant(c.app, as("teamMgr"), (s) => createProject(s, { name: "t" })))).toBe("FORBIDDEN");
-      expect(await code(withTenant(c.app, as("teamMgr"), (s) => getProject(s, O.project.id)))).toBe("FORBIDDEN");
+      expect(await code(withTenant(c.app, as("teamMgr"), (s) => getProject(s, O.project.id)))).toBe("NOT_FOUND");
     });
 
     it("the same team-scoped manager is allowed inside their own team scope", async () => {

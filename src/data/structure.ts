@@ -1,6 +1,8 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
+import { can } from "@/authz/evaluate";
 import { notFound } from "@/lib/errors";
-import { auditLogs, departments, projects, teams } from "@/db/schema";
+import { auditLogs, departments, projectTeams, projects, teams } from "@/db/schema";
+import { accessibleProjectIds, projectScope } from "./scope";
 import type { TenantSession } from "./tenant";
 
 /**
@@ -55,13 +57,12 @@ export async function createTeam(s: TenantSession, input: { departmentId: string
   return row!;
 }
 
+/** Lists the projects the principal may read: all of them with an organization-wide grant, otherwise only covered ones. */
 export async function listProjects(s: TenantSession) {
-  s.require("project.read");
-  return s.tx
-    .select({ id: projects.id, name: projects.name })
-    .from(projects)
-    .where(and(eq(projects.orgId, s.orgId), isNull(projects.deletedAt)))
-    .limit(200);
+  const ids = await accessibleProjectIds(s, "project.read");
+  if (Array.isArray(ids) && ids.length === 0) return [];
+  const where = and(eq(projects.orgId, s.orgId), isNull(projects.deletedAt), ...(ids === "all" ? [] : [inArray(projects.id, ids)]));
+  return s.tx.select({ id: projects.id, name: projects.name }).from(projects).where(where).limit(200);
 }
 
 export async function createProject(s: TenantSession, input: { name: string }) {
@@ -81,11 +82,38 @@ export async function createProject(s: TenantSession, input: { name: string }) {
 }
 
 export async function getProject(s: TenantSession, projectId: string) {
-  s.require("project.read", { projectId });
+  const scope = await projectScope(s, projectId);
+  // Missing and unreadable are indistinguishable on purpose.
+  if (!scope || !can(s.principal, "project.read", scope)) throw notFound();
   const [row] = await s.tx
     .select({ id: projects.id, name: projects.name })
     .from(projects)
     .where(and(eq(projects.orgId, s.orgId), eq(projects.id, projectId), isNull(projects.deletedAt)));
   if (!row) throw notFound();
   return row;
+}
+
+export async function listTeams(s: TenantSession) {
+  s.require("team.read");
+  return s.tx
+    .select({ id: teams.id, name: teams.name, departmentId: teams.departmentId })
+    .from(teams)
+    .where(and(eq(teams.orgId, s.orgId), isNull(teams.deletedAt)))
+    .limit(500);
+}
+
+/** Replaces the set of teams participating in a project. Participating teams gain scope over its tasks. */
+export async function setProjectTeams(s: TenantSession, projectId: string, teamIds: string[]) {
+  const scope = await projectScope(s, projectId);
+  if (!scope || !can(s.principal, "project.read", scope)) throw notFound();
+  s.require("project.update", scope);
+  const ids = [...new Set(teamIds)];
+  if (ids.length > 50) throw notFound();
+  if (ids.length) {
+    const found = await s.tx.select({ id: teams.id }).from(teams).where(and(eq(teams.orgId, s.orgId), inArray(teams.id, ids), isNull(teams.deletedAt)));
+    if (found.length !== ids.length) throw notFound();
+  }
+  await s.tx.delete(projectTeams).where(and(eq(projectTeams.orgId, s.orgId), eq(projectTeams.projectId, projectId)));
+  if (ids.length) await s.tx.insert(projectTeams).values(ids.map((teamId) => ({ orgId: s.orgId, projectId, teamId })));
+  await s.tx.insert(auditLogs).values({ orgId: s.orgId, actorUserId: s.userId, action: "project.set_teams", targetType: "project", targetId: projectId, metadata: { teams: ids.length } });
 }

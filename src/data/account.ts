@@ -194,7 +194,7 @@ export async function listMembers(s: TenantSession, opts: { status?: "pending" |
         .innerJoin(roles, eq(roles.id, roleAssignments.roleId))
         .where(and(eq(roleAssignments.orgId, s.orgId), inArray(roleAssignments.membershipId, ids)))
     : [];
-  return rows.map((r) => ({ ...r, roles: assigns.filter((a) => a.membershipId === r.id).map(({ membershipId: _m, ...a }) => a) }));
+  return rows.map((r) => ({ ...r, roles: assigns.filter((a) => a.membershipId === r.id).map((a) => ({ id: a.id, roleKey: a.roleKey, scopeType: a.scopeType })) }));
 }
 
 async function lockOrgAdmins(tx: Tx, orgId: string) {
