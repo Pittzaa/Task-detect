@@ -62,11 +62,11 @@ export default function OrgLayout({ children }: { children: ReactNode }) {
         {open && <div className="scrim" onClick={() => setOpen(false)} aria-hidden="true" />}
         <div style={{ minWidth: 0 }}>
           <header className="topbar">
-            <Btn className="menu-btn" small onClick={() => setOpen(!open)} aria-label={t("ui.toggle_menu")} aria-expanded={open}>☰</Btn>
+            <Btn className="menu-btn" small onClick={() => setOpen(!open)} aria-label={t("ui.toggle_menu")} aria-expanded={open}><svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg></Btn>
             <SearchBox base={base} />
             <span className="spacer" />
             <NotificationBell orgId={orgId} />
-            <Btn small onClick={() => void setLocale(locale === "th" ? "en" : "th")} aria-label={t("ui.language")}>{locale === "th" ? "EN" : "ไทย"}</Btn>
+            <Btn small onClick={() => void setLocale(locale === "th" ? "en" : "th")} aria-label={`${locale === "th" ? "EN" : "ไทย"} (${t("ui.language")})`}>{locale === "th" ? "EN" : "ไทย"}</Btn>
             <Btn small onClick={async () => { await authApi("/sign-out", {}).catch(() => undefined); router.replace("/login"); }}>{t("ui.signout")}</Btn>
           </header>
           <main id="main" className="main" tabIndex={-1}>{children}</main>

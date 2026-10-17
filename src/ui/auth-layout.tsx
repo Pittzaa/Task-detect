@@ -9,7 +9,7 @@ export function AuthLayout({ title, children, footer }: { title: string; childre
     <main id="main" className="auth">
       <p className="row between">
         <Link href="/" style={{ fontWeight: 700, textDecoration: "none" }}>{t("app.name")}</Link>
-        <button className="btn small ghost" onClick={() => void setLocale(locale === "th" ? "en" : "th")} aria-label={t("ui.language")}>{locale === "th" ? "English" : "ไทย"}</button>
+        <button className="btn small ghost" onClick={() => void setLocale(locale === "th" ? "en" : "th")} aria-label={`${locale === "th" ? "English" : "ไทย"} (${t("ui.language")})`}>{locale === "th" ? "English" : "ไทย"}</button>
       </p>
       <div className="card">
         <h1>{title}</h1>

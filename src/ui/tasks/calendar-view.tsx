@@ -51,17 +51,21 @@ export function CalendarView({ filters, onOpen, version }: { filters: Filters; o
       {q.error && <ErrorNote error={q.error} onRetry={q.reload} />}
       {q.loading && !q.data && <Loading />}
       <div className="cal" role="grid" aria-label={t("ui.calendar")}>
-        {dow.map((d) => <div key={d} className="dow" role="columnheader">{d}</div>)}
-        {days.map((d) => {
-          const list = byDay.get(d) ?? [];
-          return (
-            <div key={d} className="day" role="gridcell" data-out={d.slice(0, 7) !== first.slice(0, 7)} data-today={d === today}>
-              <span className="num small">{Number(d.slice(8))}</span>
-              {list.slice(0, 3).map((task) => <button key={task.id} className="chip" onClick={() => onOpen(task.id)} title={task.title}>{task.title}</button>)}
-              {list.length > 3 && <span className="muted small">+{list.length - 3}</span>}
-            </div>
-          );
-        })}
+        <div className="week" role="row">{dow.map((d) => <div key={d} className="dow" role="columnheader">{d}</div>)}</div>
+        {Array.from({ length: 6 }, (_, w) => (
+          <div key={w} className="week" role="row">
+            {days.slice(w * 7, w * 7 + 7).map((d) => {
+              const list = byDay.get(d) ?? [];
+              return (
+                <div key={d} className="day" role="gridcell" data-out={d.slice(0, 7) !== first.slice(0, 7)} data-today={d === today}>
+                  <span className="num small">{Number(d.slice(8))}</span>
+                  {list.slice(0, 3).map((task) => <button key={task.id} className="chip" onClick={() => onOpen(task.id)} title={task.title}>{task.title}</button>)}
+                  {list.length > 3 && <span className="muted small">+{list.length - 3}</span>}
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
     </div>
   );

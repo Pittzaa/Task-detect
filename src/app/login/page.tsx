@@ -20,6 +20,7 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [needsCode, setNeedsCode] = useState(false);
+  const [useBackup, setUseBackup] = useState(false);
   const [message, setMessage] = useState<{ kind: "error" | "success" | "warn"; text: string } | undefined>(() => (params.get("verified") ? { kind: "success", text: t("ui.password_changed") } : undefined));
   const [busy, setBusy] = useState(false);
   const [google, setGoogle] = useState(false);
@@ -31,7 +32,7 @@ function LoginForm() {
     setBusy(true); setMessage(undefined);
     try {
       if (needsCode) {
-        await authApi("/two-factor/verify-totp", { code: code.trim() });
+        await authApi(useBackup ? "/two-factor/verify-backup-code" : "/two-factor/verify-totp", { code: code.trim() });
       } else {
         const res = await authApi<{ twoFactorRedirect?: boolean }>("/sign-in/email", { email, password });
         if (res.twoFactorRedirect) { setNeedsCode(true); setBusy(false); return; }
@@ -58,7 +59,10 @@ function LoginForm() {
             <Field label={t("ui.password")}>{(id) => <input id={id} type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />}</Field>
           </>
         ) : (
-          <Field label={t("ui.two_factor_code")}>{(id) => <input id={id} inputMode="numeric" autoComplete="one-time-code" required value={code} onChange={(e) => setCode(e.target.value)} />}</Field>
+          <>
+            <Field label={useBackup ? t("ui.backup_code") : t("ui.two_factor_code")}>{(id) => <input id={id} inputMode={useBackup ? "text" : "numeric"} autoComplete="one-time-code" autoCapitalize="none" autoCorrect="off" required value={code} onChange={(e) => setCode(e.target.value)} />}</Field>
+            <p><button type="button" className="linklike" onClick={() => { setUseBackup(!useBackup); setCode(""); setMessage(undefined); }}>{useBackup ? t("ui.use_authenticator") : t("ui.use_backup_code")}</button></p>
+          </>
         )}
         <div className="row between">
           <Btn type="submit" kind="primary" disabled={busy}>{t("ui.signin")}</Btn>

@@ -18,8 +18,8 @@ export function NotificationBell({ orgId }: { orgId: string }) {
   const unread = q.data?.unread ?? 0;
   return (
     <div className="bell" style={{ position: "relative" }}>
-      <Btn small onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="true" aria-label={`${t("ui.notifications")}${unread ? ` (${unread})` : ""}`}>
-        <span aria-hidden="true">🔔</span>{unread > 0 && <span className="count" aria-hidden="true">{unread > 99 ? "99+" : unread}</span>}
+      <Btn small onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="true">
+        <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg><span className="sr-only">{t("ui.notifications")}</span>{unread > 0 && <span className="count">{unread > 99 ? "99+" : unread}</span>}
       </Btn>
       {open && (
         <div className="card" role="region" aria-label={t("ui.notifications")} style={{ position: "absolute", right: 0, top: "110%", width: "min(380px, 92vw)", maxHeight: "70vh", overflow: "auto", zIndex: 60 }}>

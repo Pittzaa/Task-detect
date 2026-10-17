@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { login, state, useEnglish } from "./helpers";
+import { login, state, useEnglish, alerts } from "./helpers";
 
 /**
  * Real browser, real server, real database. Runs after 01-onboarding (the administrator and the viewer Sam exist).
@@ -163,7 +163,7 @@ test("attachments: allowed files upload and download as attachments, HTML is ref
   expect(Buffer.compare(await res.body(), PNG)).toBe(0);
 
   await d.getByLabel("Upload file").setInputFiles({ name: "evil.html", mimeType: "text/html", buffer: Buffer.from("<html><script>alert(1)</script></html>") });
-  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(alerts(page)).toBeVisible();
   await expect(d.getByRole("link", { name: "evil.html" })).toHaveCount(0);
 });
 

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page } from "@playwright/test";
 
 export const PASSWORD = "correct-horse-battery-9";
@@ -51,3 +52,27 @@ export async function login(page: Page, email: string, next?: string) {
   // Wait until the session cookie is set and the app navigated away, so a following goto cannot abort the sign-in request.
   await expect(page).not.toHaveURL(/\/login(\?|$)/);
 }
+
+/** Fails with the rule, impact and first offending elements for every WCAG 2.0/2.1 A/AA violation on the current page. */
+export async function expectAccessible(page: Page, label: string) {
+  const result = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  const summary = result.violations.map((v) => `${v.id} [${v.impact}] ${v.help}: ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`);
+  expect(summary, `accessibility violations on ${label}`).toEqual([]);
+}
+
+export function base32Decode(input: string): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const ch of input.replace(/=+$/, "").toUpperCase()) bits += alphabet.indexOf(ch).toString(2).padStart(5, "0");
+  const bytes: number[] = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
+  return Buffer.from(bytes).toString("utf8");
+}
+
+export async function totpFromUri(uri: string): Promise<string> {
+  const { createOTP } = await import("@better-auth/utils/otp");
+  return createOTP(base32Decode(new URL(uri).searchParams.get("secret")!)).totp();
+}
+
+/** App alerts only: Next.js adds its own empty role="alert" route announcer to every page. */
+export const alerts = (page: Page) => page.locator('[role="alert"]:not(#__next-route-announcer__)');
