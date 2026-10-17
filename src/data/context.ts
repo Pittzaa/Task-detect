@@ -1,0 +1,65 @@
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { can } from "@/authz/evaluate";
+import type { Permission } from "@/authz/permissions";
+import { auditLogs, memberships, organizations, users } from "@/db/schema";
+import { notFound } from "@/lib/errors";
+import { loadPrincipal, type TenantSession } from "./tenant";
+import { projectScope } from "./scope";
+
+const UI_FLAGS: Record<string, Permission> = {
+  manageMembers: "org.manage_members",
+  approveMembers: "org.approve_members",
+  manageRoles: "org.manage_roles",
+  manageIntegrations: "org.manage_integrations",
+  manageCustomFields: "org.manage_custom_fields",
+  readAuditLog: "org.read_audit_log",
+  createProject: "project.create",
+  manageDepartments: "department.manage",
+  manageTeams: "team.manage",
+  manageLabels: "label.manage",
+  manageSeries: "series.manage",
+  shareOrgViews: "view.share_org",
+};
+
+/** What the signed-in user may do at organization level. Used only to show or hide controls; the server enforces every action again. */
+export async function getContext(s: TenantSession) {
+  const [org] = await s.tx.select({ id: organizations.id, name: organizations.name }).from(organizations).where(eq(organizations.id, s.orgId));
+  if (!org) throw notFound();
+  const flags = Object.fromEntries(Object.entries(UI_FLAGS).map(([k, p]) => [k, can(s.principal, p, { orgId: s.orgId })]));
+  const readsSomething = s.principal.assignments.some((a) => a.permissions.has("task.read"));
+  return { org, can: flags, hasAnyAccess: readsSomething };
+}
+
+/** Colleagues who can currently read a project; used by assignee and mention pickers. Names only. */
+export async function listPeople(s: TenantSession, projectId: string) {
+  const scope = await projectScope(s, projectId);
+  if (!scope || !can(s.principal, "task.read", scope)) throw notFound();
+  const rows = await s.tx
+    .select({ id: users.id, name: users.name })
+    .from(memberships)
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .where(and(eq(memberships.orgId, s.orgId), eq(memberships.status, "approved"), isNull(users.deletedAt)))
+    .orderBy(asc(users.name))
+    .limit(500);
+  const out: { id: string; name: string }[] = [];
+  for (const r of rows) {
+    const principal = r.id === s.userId ? s.principal : await loadPrincipal(s.tx, r.id, s.orgId);
+    if (principal && can(principal, "task.read", scope)) out.push(r);
+  }
+  return out;
+}
+
+export async function listAuditLogs(s: TenantSession, o: { action?: string; limit?: number; offset?: number } = {}) {
+  s.require("org.read_audit_log");
+  const limit = Math.min(Math.max(o.limit ?? 50, 1), 100);
+  const rows = await s.tx
+    .select({ id: auditLogs.id, action: auditLogs.action, actorId: auditLogs.actorUserId, actorName: users.name, targetType: auditLogs.targetType, targetId: auditLogs.targetId, metadata: auditLogs.metadata, createdAt: auditLogs.createdAt })
+    .from(auditLogs)
+    .leftJoin(users, eq(users.id, auditLogs.actorUserId))
+    .where(and(eq(auditLogs.orgId, s.orgId), o.action ? sql`${auditLogs.action} like ${o.action.replace(/[\\%_]/g, "\\$&") + "%"}` : undefined))
+    .orderBy(desc(auditLogs.createdAt), desc(auditLogs.id))
+    .limit(limit + 1)
+    .offset(Math.max(o.offset ?? 0, 0));
+  return { items: rows.slice(0, limit), hasMore: rows.length > limit };
+}
+

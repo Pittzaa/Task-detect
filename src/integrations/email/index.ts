@@ -1,3 +1,4 @@
+import { appendFile } from "node:fs/promises";
 import { logger } from "@/lib/logger";
 
 export interface EmailMessage {
@@ -76,4 +77,13 @@ export function createCaptureSender() {
     },
   };
   return sender;
+}
+
+/** Development/E2E sink: appends each message as a JSON line. Never used in production. */
+export function createFileSender(path: string): EmailSender {
+  return {
+    async send(m) {
+      await appendFile(path, JSON.stringify({ to: m.to, subject: m.subject, text: m.text, at: new Date().toISOString() }) + "\n");
+    },
+  };
 }

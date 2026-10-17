@@ -5,6 +5,9 @@ const optional = z.string().min(1).optional();
 const schema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    // Deployment tier. Defaults to "production" whenever NODE_ENV is production, so a deployment that forgets to set it gets the
+    // strictest rules. Only automated browser tests set "e2e" (a production build served over http with an email sink).
+    APP_ENV: z.enum(["production", "staging", "development", "test", "e2e"]).optional(),
     APP_URL: z.string().url().default("http://localhost:3000"),
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
     DATABASE_URL_UNPOOLED: optional,
@@ -22,9 +25,13 @@ const schema = z
     GOOGLE_CALENDAR_CLIENT_SECRET: optional,
     CRON_SECRET: z.string().min(16).optional(),
     BLOB_READ_WRITE_TOKEN: optional,
+    // Development/E2E only: append outgoing emails to this file instead of sending. Forbidden in production.
+    EMAIL_SINK_FILE: optional,
   })
   .superRefine((env, ctx) => {
-    if (env.NODE_ENV !== "production") return;
+    const tier = env.APP_ENV ?? (env.NODE_ENV === "production" ? "production" : env.NODE_ENV);
+    if (env.EMAIL_SINK_FILE && tier !== "e2e" && tier !== "development" && tier !== "test") ctx.addIssue({ code: "custom", path: ["EMAIL_SINK_FILE"], message: "only allowed in development, test and e2e" });
+    if (tier !== "production" && tier !== "staging") return;
     for (const key of ["BETTER_AUTH_SECRET", "APP_ENCRYPTION_KEY", "RESEND_API_KEY", "EMAIL_FROM", "CRON_SECRET"] as const) {
       if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: "required in production" });
     }
@@ -35,12 +42,17 @@ const schema = z
 
 export type Env = z.infer<typeof schema>;
 
+/** The effective deployment tier (see APP_ENV). */
+export const tierOf = (env: Pick<Env, "APP_ENV" | "NODE_ENV">) => env.APP_ENV ?? (env.NODE_ENV === "production" ? "production" : env.NODE_ENV);
+
 let cached: Env | undefined;
 
 /** Parses and caches server-side environment. Never import this from client components. */
 export function getEnv(source: NodeJS.ProcessEnv = process.env): Env {
   if (source === process.env && cached) return cached;
-  const parsed = schema.safeParse(source);
+  // A blank value (`KEY=` in a copied .env file, or a Vercel variable left empty) means "not set".
+  const cleaned = Object.fromEntries(Object.entries(source).filter(([, v]) => v !== undefined && v.trim() !== ""));
+  const parsed = schema.safeParse(cleaned);
   if (!parsed.success) {
     // Report variable names only; values may be secrets.
     const names = [...new Set(parsed.error.issues.map((i) => i.path.join(".")))].join(", ");

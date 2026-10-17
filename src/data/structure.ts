@@ -90,7 +90,7 @@ export async function getProject(s: TenantSession, projectId: string) {
     .from(projects)
     .where(and(eq(projects.orgId, s.orgId), eq(projects.id, projectId), isNull(projects.deletedAt)));
   if (!row) throw notFound();
-  return row;
+  return { ...row, teamIds: [...(scope.teamIds ?? [])] };
 }
 
 export async function listTeams(s: TenantSession) {

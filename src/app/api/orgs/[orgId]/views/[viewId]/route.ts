@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { deleteView, updateView } from "@/data/views";
+import { deleteView, getView, updateView } from "@/data/views";
 import { handle, readJson } from "@/server/api";
 import { uuid } from "@/server/schemas";
 
 type P = { params: Promise<{ orgId: string; viewId: string }> };
+export const GET = (req: Request, { params }: P) => handle(req, async (c) => { const p = await params; return c.tenant(p.orgId, (s) => getView(s, uuid.parse(p.viewId))); });
 export const PATCH = (req: Request, { params }: P) =>
   handle(req, async (c) => {
     const p = await params;

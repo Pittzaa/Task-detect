@@ -123,3 +123,9 @@ export async function runView(s: TenantSession, id: string, opts: { today: strin
   const result = await listTasks(s, { ...rest, custom, today: opts.today, limit: opts.limit, offset: opts.offset });
   return { view: { id: v.id, name: v.name, kind: v.kind, scope: v.scope }, ...result };
 }
+
+/** The stored definition (filters) of a view the caller may see. Running it is a separate, permission-checked step. */
+export async function getView(s: TenantSession, id: string) {
+  const v = await loadView(s, id);
+  return { id: v.id, name: v.name, kind: v.kind, scope: v.scope, teamId: v.teamId, filter: v.filter, editable: canManage(s, v) };
+}

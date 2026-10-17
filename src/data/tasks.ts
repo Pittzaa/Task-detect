@@ -480,8 +480,12 @@ export interface TaskSummary {
   dueDate: string | null;
   completedAt: Date | null;
   primaryAssigneeId: string | null;
+  primaryAssigneeName: string | null;
   coAssigneeIds: string[];
+  assignees: { id: string; name: string }[];
   labelIds: string[];
+  /** What the caller may do with this particular task; used only to show or hide controls. */
+  perms: { update: boolean; changeStatus: boolean; reopen: boolean };
   blockedByCount: number;
   subtaskCount: number;
   seriesId: string | null;
@@ -583,10 +587,20 @@ async function hydrate(s: TenantSession, rows: TaskRow[]): Promise<TaskSummary[]
     .where(and(eq(tasks.orgId, s.orgId), inArray(tasks.parentId, ids), isNull(tasks.deletedAt)))
     .groupBy(tasks.parentId);
   const custom = await valuesForTasks(s.tx, s.orgId, ids);
+  const nameIds = [...new Set([...rows.map((r) => r.primaryAssigneeId), ...co.map((x) => x.userId)].filter((x): x is string => !!x))];
+  const names = new Map((nameIds.length ? await s.tx.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, nameIds)) : []).map((u) => [u.id, u.name]));
+  const scopes = await projectScopes(s, [...new Set(rows.map((r) => r.projectId))]);
   return rows.map((r) => ({
     id: r.id, projectId: r.projectId, parentId: r.parentId, title: r.title, status: r.status, priority: r.priority,
     startDate: r.startDate, dueDate: r.dueDate, completedAt: r.completedAt, primaryAssigneeId: r.primaryAssigneeId,
+    primaryAssigneeName: r.primaryAssigneeId ? names.get(r.primaryAssigneeId) ?? null : null,
     coAssigneeIds: co.filter((x) => x.taskId === r.id).map((x) => x.userId),
+    assignees: [...(r.primaryAssigneeId ? [r.primaryAssigneeId] : []), ...co.filter((x) => x.taskId === r.id).map((x) => x.userId)].map((id) => ({ id, name: names.get(id) ?? "" })),
+    perms: {
+      update: can(s.principal, "task.update", scopes.get(r.projectId)!),
+      changeStatus: can(s.principal, "task.change_status", scopes.get(r.projectId)!),
+      reopen: can(s.principal, "task.reopen", scopes.get(r.projectId)!),
+    },
     labelIds: lbl.filter((x) => x.taskId === r.id).map((x) => x.labelId),
     blockedByCount: blocked.find((x) => x.taskId === r.id)?.n ?? 0,
     subtaskCount: kids.find((x) => x.parentId === r.id)?.n ?? 0,

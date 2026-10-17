@@ -108,3 +108,14 @@ describe("date-only validation", () => {
     expect(validateDateRange("2026-02-30", null)).toBe(false);
   });
 });
+
+describe("allowedTransitions (UI helper)", () => {
+  it("offers only legal, permitted moves", async () => {
+    const { allowedTransitions } = await import("@/domain/workflow");
+    expect(allowedTransitions("todo", { canChange: true, canReopen: false }).sort()).toEqual(["blocked", "cancelled", "progress"]);
+    expect(allowedTransitions("done", { canChange: true, canReopen: false })).toEqual([]);
+    expect(allowedTransitions("done", { canChange: true, canReopen: true }).sort()).toEqual(["progress", "todo"]);
+    expect(allowedTransitions("cancelled", { canChange: true, canReopen: true })).toEqual(["todo"]);
+    expect(allowedTransitions("progress", { canChange: false, canReopen: true })).toEqual([]);
+  });
+});

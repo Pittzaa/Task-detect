@@ -76,3 +76,12 @@ export function validateDateRange(start: string | null | undefined, due: string 
   if (due && !isValidDateOnly(due)) return false;
   return !start || !due || due >= start; // ISO dates compare lexicographically
 }
+
+/** Statuses a task can move to from `from`, honouring the reopen permission. Used to build UI controls; the server decides. */
+export function allowedTransitions(from: TaskStatus, o: { canChange: boolean; canReopen: boolean }): TaskStatus[] {
+  if (!o.canChange) return [];
+  return TASK_STATUSES.filter((to) => {
+    const k = transitionKind(from, to);
+    return k === "normal" || (k === "reopen" && o.canReopen);
+  });
+}

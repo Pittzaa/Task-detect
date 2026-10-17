@@ -7,3 +7,8 @@ out
 *.tsbuildinfo
 next-env.d.ts
 coverage
+
+# e2e artifacts
+.data/
+test-results/
+playwright-report/

@@ -32,3 +32,30 @@ describe("env validation", () => {
     expect(env.LOG_LEVEL).toBe("info");
   });
 });
+
+describe("deployment tiers", () => {
+  const base = { DATABASE_URL: "postgres://x" } as unknown as NodeJS.ProcessEnv;
+  it("production requires the secrets, https and forbids the email sink", () => {
+    expect(() => getEnv({ ...base, NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(/BETTER_AUTH_SECRET/);
+    const prod = { ...base, NODE_ENV: "production", BETTER_AUTH_SECRET: "x".repeat(40), APP_ENCRYPTION_KEY: "k", RESEND_API_KEY: "r", EMAIL_FROM: "a@b.c", CRON_SECRET: "c".repeat(20) } as unknown as NodeJS.ProcessEnv;
+    expect(() => getEnv({ ...prod, APP_URL: "http://app.example" } as NodeJS.ProcessEnv)).toThrow(/APP_URL/);
+    expect(() => getEnv({ ...prod, APP_URL: "https://app.example", EMAIL_SINK_FILE: "/tmp/x" } as NodeJS.ProcessEnv)).toThrow(/EMAIL_SINK_FILE/);
+    expect(getEnv({ ...prod, APP_URL: "https://app.example" } as NodeJS.ProcessEnv).NODE_ENV).toBe("production");
+  });
+  it("a production build with no APP_ENV is still treated as production (cannot be relaxed by omission)", () => {
+    expect(() => getEnv({ ...base, NODE_ENV: "production", EMAIL_SINK_FILE: "/tmp/x" } as NodeJS.ProcessEnv)).toThrow();
+  });
+  it("only the explicit e2e tier allows a production build over http with an email sink", () => {
+    expect(getEnv({ ...base, NODE_ENV: "production", APP_ENV: "e2e", EMAIL_SINK_FILE: "/tmp/x" } as unknown as NodeJS.ProcessEnv).APP_ENV).toBe("e2e");
+  });
+  it("blank values count as unset: optional ones are ignored, required ones still fail", () => {
+    const prod = { ...base, NODE_ENV: "production", APP_URL: "https://app.example", BETTER_AUTH_SECRET: "x".repeat(40), APP_ENCRYPTION_KEY: "k", RESEND_API_KEY: "r", EMAIL_FROM: "a@b.c", CRON_SECRET: "c".repeat(20) };
+    const env = getEnv({ ...prod, BLOB_READ_WRITE_TOKEN: "", GOOGLE_CLIENT_ID: "  ", GOOGLE_CLIENT_SECRET: "" } as unknown as NodeJS.ProcessEnv);
+    expect(env.BLOB_READ_WRITE_TOKEN).toBeUndefined();
+    expect(env.GOOGLE_CLIENT_ID).toBeUndefined();
+    expect(() => getEnv({ ...prod, RESEND_API_KEY: "" } as unknown as NodeJS.ProcessEnv)).toThrow(/RESEND_API_KEY/);
+  });
+  it("staging is held to production rules", () => {
+    expect(() => getEnv({ ...base, NODE_ENV: "production", APP_ENV: "staging" } as unknown as NodeJS.ProcessEnv)).toThrow(/BETTER_AUTH_SECRET/);
+  });
+});
