@@ -65,7 +65,6 @@ export function detectFile(bytes: Uint8Array, filename: string): DetectedFile | 
 /** Display-only name: no path parts, control characters or reserved characters, bounded length. */
 export function sanitizeFilename(input: string): string {
   let name = input.normalize("NFC").split(/[\\/]/).pop() ?? "";
-  // eslint-disable-next-line no-control-regex
   name = name.replace(/[\u0000-\u001f\u007f]/g, "").replace(/[<>:"|?*\u202a-\u202e\u2066-\u2069]/g, "_").replace(/\s+/g, " ").trim().replace(/^\.+/, "");
   if (!name) return "file";
   if (name.length > 120) {

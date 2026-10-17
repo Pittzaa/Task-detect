@@ -43,6 +43,20 @@
       "when": 1792255933789,
       "tag": "0005_work_management_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792256654512,
+      "tag": "0006_productivity",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792256655520,
+      "tag": "0007_productivity_rls",
+      "breakpoints": true
     }
   ]
 }

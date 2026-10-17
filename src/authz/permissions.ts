@@ -36,6 +36,9 @@ export const PERMISSIONS = [
   "task.reopen",
   "task.attach",
   "label.manage",
+  "view.share_team",
+  "view.share_org",
+  "series.manage",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -65,6 +68,8 @@ const MANAGER: Permission[] = [
   "team.manage_members",
   "task.reopen",
   "label.manage",
+  "view.share_team",
+  "series.manage",
 ];
 
 /**

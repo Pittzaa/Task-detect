@@ -13,6 +13,11 @@ export interface TenantSession {
   principal: Principal;
   /** Throws `forbidden` (and records an audit entry after rollback) unless the principal holds the permission for the resource. */
   require(permission: Permission, resource?: Omit<ResourceScope, "orgId">): void;
+  /**
+   * For organization-level metadata that is safe for anyone who holds the permission *somewhere*
+   * (for example listing labels or custom field definitions).
+   */
+  requireAny(permission: Permission): void;
 }
 
 async function setContext(tx: Tx, userId: string, orgId: string | null) {
@@ -94,6 +99,9 @@ export async function withTenant<T>(
           if (!can(principal, permission, { orgId: auth.orgId, ...resource })) {
             throw forbidden({ permission });
           }
+        },
+        requireAny(permission) {
+          if (!principal.assignments.some((a) => a.permissions.has(permission))) throw forbidden({ permission });
         },
       });
     });

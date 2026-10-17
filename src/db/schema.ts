@@ -8,6 +8,7 @@ import {
   foreignKey,
   index,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   primaryKey,
@@ -376,7 +377,8 @@ export const tasks = pgTable(
     check("tasks_not_own_parent", sql`${t.parentId} is null or ${t.parentId} <> ${t.id}`),
     check("tasks_completed_iff_done", sql`(${t.status} = 'done') = (${t.completedAt} is not null)`),
     check("tasks_reminder_range", sql`${t.reminderDaysBefore} is null or ${t.reminderDaysBefore} between 0 and 30`),
-    uniqueIndex("tasks_series_occurrence_uq").on(t.seriesId, t.occurrenceDate).where(sql`${t.seriesId} is not null`),
+    // Soft-deleted occurrences release their slot so a paused/rescheduled series can regenerate that date.
+    uniqueIndex("tasks_series_occurrence_uq").on(t.seriesId, t.occurrenceDate).where(sql`${t.seriesId} is not null and ${t.deletedAt} is null`),
     index("tasks_project_status_idx").on(t.orgId, t.projectId, t.status).where(sql`${t.deletedAt} is null`),
     index("tasks_assignee_idx").on(t.orgId, t.primaryAssigneeId, t.status).where(sql`${t.deletedAt} is null`),
     index("tasks_due_idx").on(t.orgId, t.dueDate).where(sql`${t.deletedAt} is null`),
@@ -529,4 +531,129 @@ export const outboxEvents = pgTable(
     attempts: integer("attempts").notNull().default(0),
   },
   (t) => [index("outbox_events_pending_idx").on(t.createdAt).where(sql`${t.processedAt} is null`)],
+);
+
+// ---------------------------------------------------------------------------------------------
+// Productivity and customization (Phase 3)
+// ---------------------------------------------------------------------------------------------
+
+export const customFieldType = pgEnum("custom_field_type", ["text", "number", "date", "dropdown", "checkbox"]);
+export const viewScope = pgEnum("view_scope", ["personal", "team", "organization"]);
+export const viewKind = pgEnum("view_kind", ["list", "board", "calendar", "timeline", "my_tasks"]);
+
+/** A recurring task template. Occurrences are ordinary tasks linked by (series_id, occurrence_date). */
+export const recurrenceSeries = pgTable(
+  "recurrence_series",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    priority: taskPriority("priority").notNull().default("medium"),
+    primaryAssigneeId: uuid("primary_assignee_id"),
+    reminderDaysBefore: integer("reminder_days_before"),
+    // Days between an occurrence's date and its due date (0 = due on the occurrence date).
+    dueOffsetDays: integer("due_offset_days").notNull().default(0),
+    // Rule document validated by src/domain/recurrence.ts (frequency, interval, weekdays, ...).
+    rule: jsonb("rule").$type<Record<string, unknown>>().notNull(),
+    startDate: date("start_date").notNull(),
+    endDate: date("end_date"),
+    maxOccurrences: integer("max_occurrences"),
+    // The time zone the series was created in; reminders are computed in the assignee's zone.
+    timezone: text("timezone").notNull(),
+    active: boolean("active").notNull().default(true),
+    // Occurrences up to and including this date have been generated (idempotent high-water mark).
+    generatedThrough: date("generated_through"),
+    createdBy: uuid("created_by").notNull().references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: deletedAt(),
+  },
+  (t) => [
+    unique("recurrence_series_org_id_uq").on(t.orgId, t.id),
+    foreignKey({ name: "recurrence_series_project_fk", columns: [t.orgId, t.projectId], foreignColumns: [projects.orgId, projects.id] }),
+    foreignKey({ name: "recurrence_series_assignee_fk", columns: [t.orgId, t.primaryAssigneeId], foreignColumns: [memberships.orgId, memberships.userId] }),
+    check("recurrence_series_title_len", sql`char_length(${t.title}) between 1 and 300`),
+    check("recurrence_series_dates", sql`${t.endDate} is null or ${t.endDate} >= ${t.startDate}`),
+    check("recurrence_series_offset", sql`${t.dueOffsetDays} between 0 and 365`),
+    check("recurrence_series_max", sql`${t.maxOccurrences} is null or ${t.maxOccurrences} between 1 and 1000`),
+  ],
+);
+
+export const customFieldDefs = pgTable(
+  "custom_field_defs",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    name: text("name").notNull(),
+    // The type cannot change after creation, so stored values always match their definition.
+    type: customFieldType("type").notNull(),
+    // Dropdown only: [{ id, label, archived? }]. Option ids are stable; labels may be renamed.
+    options: jsonb("options").$type<{ id: string; label: string; archived?: boolean }[]>().notNull().default([]),
+    // Number only.
+    minValue: numeric("min_value"),
+    maxValue: numeric("max_value"),
+    // Typed default applied to new tasks (stored as text, parsed by type).
+    defaultValue: text("default_value"),
+    position: integer("position").notNull().default(0),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("custom_field_defs_org_id_uq").on(t.orgId, t.id),
+    uniqueIndex("custom_field_defs_name_uq").on(t.orgId, sql`lower(${t.name})`).where(sql`${t.archivedAt} is null`),
+    check("custom_field_defs_name_len", sql`char_length(${t.name}) between 1 and 60`),
+    check("custom_field_defs_range", sql`${t.minValue} is null or ${t.maxValue} is null or ${t.maxValue} >= ${t.minValue}`),
+  ],
+);
+
+/** One typed column per kind (no catch-all JSON). At most one column may be set. */
+export const customFieldValues = pgTable(
+  "custom_field_values",
+  {
+    orgId: uuid("org_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    fieldId: uuid("field_id").notNull(),
+    textValue: text("text_value"),
+    numberValue: numeric("number_value"),
+    dateValue: date("date_value"),
+    optionValue: text("option_value"),
+    boolValue: boolean("bool_value"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.taskId, t.fieldId] }),
+    foreignKey({ name: "custom_field_values_task_fk", columns: [t.orgId, t.taskId], foreignColumns: [tasks.orgId, tasks.id] }),
+    foreignKey({ name: "custom_field_values_field_fk", columns: [t.orgId, t.fieldId], foreignColumns: [customFieldDefs.orgId, customFieldDefs.id] }),
+    check(
+      "custom_field_values_single",
+      sql`(case when ${t.textValue} is not null then 1 else 0 end + case when ${t.numberValue} is not null then 1 else 0 end + case when ${t.dateValue} is not null then 1 else 0 end + case when ${t.optionValue} is not null then 1 else 0 end + case when ${t.boolValue} is not null then 1 else 0 end) = 1`,
+    ),
+    index("custom_field_values_field_idx").on(t.orgId, t.fieldId),
+  ],
+);
+
+export const savedViews = pgTable(
+  "saved_views",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    ownerId: uuid("owner_id").notNull().references(() => users.id),
+    name: text("name").notNull(),
+    scope: viewScope("scope").notNull().default("personal"),
+    teamId: uuid("team_id"),
+    kind: viewKind("kind").notNull().default("list"),
+    // A filter *definition* (validated by zod on write and on read). Sharing a view never shares data.
+    filter: jsonb("filter").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: deletedAt(),
+  },
+  (t) => [
+    foreignKey({ name: "saved_views_team_fk", columns: [t.orgId, t.teamId], foreignColumns: [teams.orgId, teams.id] }),
+    check("saved_views_team_scope", sql`(${t.scope} = 'team') = (${t.teamId} is not null)`),
+    check("saved_views_name_len", sql`char_length(${t.name}) between 1 and 80`),
+    index("saved_views_org_idx").on(t.orgId, t.scope),
+  ],
 );

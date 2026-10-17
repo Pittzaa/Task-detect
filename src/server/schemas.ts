@@ -23,6 +23,7 @@ export const createTaskBody = z
     primaryAssigneeId: uuid.nullable().optional(),
     coAssigneeIds: z.array(uuid).max(20).optional(),
     labelIds: z.array(uuid).max(20).optional(),
+    customFields: z.record(uuid, z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
   })
   .strict();
 
@@ -59,3 +60,29 @@ export const taskQuery = z.object({
 });
 
 export const pageQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).optional(), offset: z.coerce.number().int().min(0).max(100_000).optional() });
+
+/** `cf=<fieldId>|<op>|<value>` (repeatable) */
+export function parseCustomFilters(url: string) {
+  const out: { fieldId: string; op: "contains" | "eq" | "gt" | "gte" | "lt" | "lte" | "in" | "from" | "to"; value: string }[] = [];
+  for (const raw of new URL(url).searchParams.getAll("cf").slice(0, 6)) {
+    const [fieldId, op, ...rest] = raw.split("|");
+    const parsed = z.object({ fieldId: uuid, op: z.enum(["contains", "eq", "gt", "gte", "lt", "lte", "in", "from", "to"]), value: z.string().max(200) }).parse({ fieldId, op, value: rest.join("|") });
+    out.push(parsed);
+  }
+  return out;
+}
+
+export const customValues = z.record(uuid, z.union([z.string(), z.number(), z.boolean(), z.null()]));
+
+export const bulkBody = z
+  .object({
+    taskIds: z.array(uuid).min(1).max(100),
+    atomic: z.boolean().optional(),
+    action: z.discriminatedUnion("type", [
+      z.object({ type: z.literal("status"), status }),
+      z.object({ type: z.literal("priority"), priority }),
+      z.object({ type: z.literal("assignee"), userId: uuid.nullable() }),
+      z.object({ type: z.literal("dueDate"), dueDate: dateOnly.nullable() }),
+    ]),
+  })
+  .strict();

@@ -11,6 +11,8 @@ import {
   type TaskPriority, type TaskStatus,
 } from "@/domain/workflow";
 import { conflict, forbidden, notFound, validation } from "@/lib/errors";
+import { customFilterConditions, defaultsFor, valuesForTasks, writeCustomValues, type CustomFilter } from "./custom-fields";
+import { escapeLikeValue } from "./like";
 import { accessibleProjectIds, projectScope, projectScopes } from "./scope";
 import { loadPrincipal, type TenantSession } from "./tenant";
 
@@ -99,6 +101,8 @@ export interface CreateTaskInput {
   primaryAssigneeId?: string | null;
   coAssigneeIds?: string[];
   labelIds?: string[];
+  /** fieldId -> value; fields not supplied receive their configured default */
+  customFields?: Record<string, unknown>;
 }
 
 export async function createTask(s: TenantSession, input: CreateTaskInput) {
@@ -141,6 +145,7 @@ export async function createTask(s: TenantSession, input: CreateTaskInput) {
     .returning();
   if (co.length) await s.tx.insert(taskAssignees).values(co.map((userId) => ({ orgId: s.orgId, taskId: row!.id, userId })));
   if (labelIds.length) await s.tx.insert(taskLabels).values(labelIds.map((labelId) => ({ orgId: s.orgId, taskId: row!.id, labelId })));
+  await writeCustomValues(s.tx, s.orgId, row!.id, { ...(await defaultsFor(s.tx, s.orgId)), ...(input.customFields ?? {}) });
   await activity(s, row!.id, "created");
   await audit(s, "task.create", row!.id);
   await emit(s, "task.created", { taskId: row!.id, actorId: s.userId });
@@ -344,7 +349,14 @@ export async function restoreTask(s: TenantSession, taskId: string) {
   const restorable = kids.length
     ? (await s.tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.orgId, s.orgId), inArray(tasks.id, kids), eq(tasks.deletedAt, task.deletedAt)))).map((r) => r.id)
     : [];
-  await s.tx.update(tasks).set({ deletedAt: null, deletedBy: null, updatedAt: new Date() }).where(and(eq(tasks.orgId, s.orgId), inArray(tasks.id, [task.id, ...restorable])));
+  try {
+    await s.tx.transaction(async (sp) => {
+      await sp.update(tasks).set({ deletedAt: null, deletedBy: null, updatedAt: new Date() }).where(and(eq(tasks.orgId, s.orgId), inArray(tasks.id, [task.id, ...restorable])));
+    });
+  } catch (e) {
+    if (String((e as { cause?: unknown }).cause ?? e).includes("tasks_series_occurrence_uq")) throw conflict("An occurrence for this date already exists");
+    throw e;
+  }
   await activity(s, task.id, "restored");
   await audit(s, "task.restore", task.id);
   return { restored: 1 + restorable.length };
@@ -426,7 +438,7 @@ export async function createLabel(s: TenantSession, input: { name: string; color
 }
 
 export async function listLabels(s: TenantSession) {
-  s.require("org.read");
+  s.requireAny("org.read");
   return s.tx.select({ id: labels.id, name: labels.name, color: labels.color }).from(labels).where(eq(labels.orgId, s.orgId)).orderBy(asc(labels.name)).limit(500);
 }
 
@@ -441,6 +453,14 @@ export async function setTaskLabels(s: TenantSession, taskId: string, labelIds: 
   await s.tx.delete(taskLabels).where(and(eq(taskLabels.orgId, s.orgId), eq(taskLabels.taskId, task.id)));
   if (ids.length) await s.tx.insert(taskLabels).values(ids.map((labelId) => ({ orgId: s.orgId, taskId: task.id, labelId })));
   await activity(s, task.id, "labels_changed", { count: ids.length });
+}
+
+export async function setTaskCustomValues(s: TenantSession, taskId: string, values: Record<string, unknown>) {
+  const { task, scope } = await loadTask(s, taskId, { forUpdate: true });
+  need(s, "task.update", scope);
+  await writeCustomValues(s.tx, s.orgId, task.id, values);
+  await s.tx.update(tasks).set({ updatedAt: new Date(), updatedBy: s.userId }).where(eq(tasks.id, task.id));
+  await activity(s, task.id, "custom_fields_changed", { fieldIds: Object.keys(values) });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -463,6 +483,7 @@ export interface TaskSummary {
   blockedByCount: number;
   subtaskCount: number;
   seriesId: string | null;
+  customFields: Record<string, unknown>;
   version: number;
   updatedAt: Date;
 }
@@ -490,11 +511,13 @@ export interface TaskFilter {
   order?: "asc" | "desc";
   limit?: number;
   offset?: number;
-  /** Extra SQL conditions supplied by trusted callers (custom fields, saved views). */
+  /** custom field predicates (validated against the field definitions) */
+  custom?: CustomFilter[];
+  /** Extra SQL conditions supplied by trusted callers. */
   extra?: SQL[];
 }
 
-export const escapeLike = (v: string) => v.replace(/[\\%_]/g, (c) => "\\" + c);
+export const escapeLike = escapeLikeValue;
 
 export async function listTasks(s: TenantSession, f: TaskFilter = {}): Promise<{ items: TaskSummary[]; hasMore: boolean }> {
   const accessible = await accessibleProjectIds(s, "task.read");
@@ -522,6 +545,7 @@ export async function listTasks(s: TenantSession, f: TaskFilter = {}): Promise<{
   if (f.parentId) conds.push(eq(tasks.parentId, f.parentId));
   if (f.topLevelOnly) conds.push(isNull(tasks.parentId));
   if (f.overdue && f.today) conds.push(and(isNotNull(tasks.dueDate), sql`${tasks.dueDate} < ${f.today}`, notInArray(tasks.status, ["done", "cancelled"])));
+  for (const x of await customFilterConditions(s.tx, s.orgId, f.custom ?? [])) conds.push(x);
   for (const x of f.extra ?? []) conds.push(x);
 
   const dir = f.order === "desc" ? desc : asc;
@@ -556,6 +580,7 @@ async function hydrate(s: TenantSession, rows: TaskRow[]): Promise<TaskSummary[]
     .from(tasks)
     .where(and(eq(tasks.orgId, s.orgId), inArray(tasks.parentId, ids), isNull(tasks.deletedAt)))
     .groupBy(tasks.parentId);
+  const custom = await valuesForTasks(s.tx, s.orgId, ids);
   return rows.map((r) => ({
     id: r.id, projectId: r.projectId, parentId: r.parentId, title: r.title, status: r.status, priority: r.priority,
     startDate: r.startDate, dueDate: r.dueDate, completedAt: r.completedAt, primaryAssigneeId: r.primaryAssigneeId,
@@ -563,7 +588,7 @@ async function hydrate(s: TenantSession, rows: TaskRow[]): Promise<TaskSummary[]
     labelIds: lbl.filter((x) => x.taskId === r.id).map((x) => x.labelId),
     blockedByCount: blocked.find((x) => x.taskId === r.id)?.n ?? 0,
     subtaskCount: kids.find((x) => x.parentId === r.id)?.n ?? 0,
-    seriesId: r.seriesId, version: r.version, updatedAt: r.updatedAt,
+    seriesId: r.seriesId, customFields: custom.get(r.id) ?? {}, version: r.version, updatedAt: r.updatedAt,
   }));
 }
 
@@ -627,3 +652,9 @@ export async function getActivity(s: TenantSession, taskId: string, opts: { limi
 }
 
 export { isTerminal };
+
+/** Sets the primary assignee while preserving co-assignees (used by bulk actions). */
+export async function setPrimaryAssignee(s: TenantSession, taskId: string, userId: string | null) {
+  const co = (await s.tx.select({ userId: taskAssignees.userId }).from(taskAssignees).where(and(eq(taskAssignees.orgId, s.orgId), eq(taskAssignees.taskId, taskId)))).map((r) => r.userId);
+  return setAssignees(s, taskId, { primary: userId, co: co.filter((u) => u !== userId) });
+}
