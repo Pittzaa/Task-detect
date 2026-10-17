@@ -96,7 +96,7 @@ test.describe("health and traceability", () => {
     const body = (await ready.json()) as { status: string; checks: Record<string, { ok: boolean; detail?: string | number }> };
     expect(body.checks.database!.ok).toBe(true);
     expect(body.checks.rowLevelSecurity!.ok).toBe(true);
-    expect(body.checks.migrations).toMatchObject({ ok: true, detail: 12 });
+    expect(body.checks.migrations).toMatchObject({ ok: true, detail: 13 });
     expect(["ok", "degraded"]).toContain(body.status);
     expect(JSON.stringify(body)).not.toMatch(/postgres:\/\/|password|secret/i);
   });

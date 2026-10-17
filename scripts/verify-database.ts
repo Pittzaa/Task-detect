@@ -25,7 +25,7 @@ async function main() {
     record("runtime role cannot create roles or databases", !role.rolcreaterole && !role.rolcreatedb);
 
     const tables = (await c.query(`select c.relname, c.relrowsecurity, c.relforcerowsecurity from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' order by 1`)).rows as { relname: string; relrowsecurity: boolean; relforcerowsecurity: boolean }[];
-    const NO_RLS = new Set(["users", "auth_sessions", "auth_accounts", "auth_verifications", "auth_two_factor", "auth_rate_limits", "app_rate_limits", "role_permissions", "roles"]);
+    const NO_RLS = new Set(["users", "auth_sessions", "auth_accounts", "auth_verifications", "auth_two_factor", "auth_rate_limits", "app_rate_limits"]);
     const unprotected = tables.filter((t) => !NO_RLS.has(t.relname) && !(t.relrowsecurity && t.relforcerowsecurity)).map((t) => t.relname);
     record(`every tenant table has FORCED row-level security (${tables.length - NO_RLS.size} checked)`, unprotected.length === 0, unprotected.join(", ") || undefined);
 

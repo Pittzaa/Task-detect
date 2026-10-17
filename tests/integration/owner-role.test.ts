@@ -3,6 +3,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runMigrations } from "../../scripts/migrate";
 import { checkRlsEnforceable, createDb } from "@/db/client";
+import { bootstrapOrganization } from "@/data/bootstrap";
 
 /**
  * A managed Postgres gives you an ordinary, non-superuser database owner, and the row-level-security guarantees must
@@ -66,6 +67,45 @@ describe("a plain (non-superuser, non-BYPASSRLS) database owner", () => {
     expect(t.rows[0].n).toBeGreaterThanOrEqual(3); // select, insert, retention
     const f = await sup.query(`select pg_get_userbyid(proowner) as owner from pg_proc where proname = 'purge_audit_logs'`);
     expect(f.rows[0].owner).toBe(OWNER);
+  });
+
+  it("the operator bootstrap works as that plain owner (row-level security applies to it too)", async () => {
+    const { db, close } = createDb(withDb(OWNER, "owner", DB));
+    try {
+      const r = await bootstrapOrganization(db, { name: "Acme", slug: "acme-bootstrap", adminEmail: "Boss@Example.test", appUrl: "https://tasks.example.test" });
+      expect(r.inviteUrl).toMatch(/^https:\/\/tasks\.example\.test\/invite\?token=/);
+      const inv = await sup.query(`select email, accepted_at from invitations where org_id = $1`, [r.orgId]);
+      expect(inv.rows).toEqual([{ email: "boss@example.test", accepted_at: null }]);
+      const audit = await sup.query(`select action from audit_logs where org_id = $1`, [r.orgId]);
+      expect(audit.rows.map((x) => x.action)).toContain("org.bootstrap");
+      // running it again for the same slug reuses the organization and issues a fresh invitation
+      const again = await bootstrapOrganization(db, { name: "Acme", slug: "acme-bootstrap", adminEmail: "boss@example.test", appUrl: "https://tasks.example.test" });
+      expect(again.orgId).toBe(r.orgId);
+    } finally { await close(); }
+  });
+
+  it("the runtime role cannot create organizations or alter system roles, even pretending to be the worker", async () => {
+    const app = new pg.Client({ connectionString: withDb(APP, "app", DB) });
+    await app.connect();
+    try {
+      const attempts = [
+        `insert into organizations (name, slug) values ('evil', 'evil-org')`,
+        `insert into roles (key, name, is_system) values ('evilrole', 'evilrole', true)`,
+        `delete from role_permissions`,
+        `update roles set name = 'x' where org_id is null`,
+      ];
+      for (const stmt of attempts) {
+        await app.query("begin");
+        await app.query(`select set_config('app.worker', 'on', true)`);
+        const before = (await sup.query(`select (select count(*) from roles)::int as r, (select count(*) from role_permissions)::int as p, (select count(*) from organizations)::int as o`)).rows[0];
+        let changed = false;
+        try { const r = await app.query(stmt); changed = (r.rowCount ?? 0) > 0; } catch { /* refused: good */ }
+        await app.query("rollback");
+        const after = (await sup.query(`select (select count(*) from roles)::int as r, (select count(*) from role_permissions)::int as p, (select count(*) from organizations)::int as o`)).rows[0];
+        expect(changed, stmt).toBe(false);
+        expect(after, stmt).toEqual(before);
+      }
+    } finally { await app.end(); }
   });
 
   it("the runtime role passes the RLS-enforceable check", async () => {
