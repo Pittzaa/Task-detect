@@ -3,7 +3,7 @@ import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { DISCORD_EVENTS, NOTIFICATION_TYPES } from "@/domain/notifications";
 import { api } from "@/ui/api";
-import { Btn, Empty, ErrorNote, Field, Loading, Notice, Tabs, useToast } from "@/ui/components";
+import { Btn, Empty, ErrorNote, Field, Loading, Notice, TableWrap, Tabs, useToast } from "@/ui/components";
 import { useQuery } from "@/ui/hooks";
 import { useI18n } from "@/ui/i18n";
 import { useOrg } from "@/ui/org";
@@ -48,7 +48,7 @@ function NotificationSettings() {
   const s = q.data!;
   return (
     <div className="stack">
-      <div className="table-wrap"><table>
+      <TableWrap label={t("ui.notification_settings")}><table>
         <thead><tr><th>{t("ui.events")}</th><th>{t("ui.channel_in_app")}</th><th>{t("ui.channel_email")}</th></tr></thead>
         <tbody>
           {NOTIFICATION_TYPES.map((ev) => (
@@ -61,7 +61,7 @@ function NotificationSettings() {
             </tr>
           ))}
         </tbody>
-      </table></div>
+      </table></TableWrap>
       <div className="card grid cols-3">
         <Field label={t("ui.digest")}>{(id) => (
           <select id={id} value={s.digest} onChange={(e) => void put({ digest: e.target.value })}><option value="off">{t("ui.digest_off")}</option><option value="daily">{t("ui.digest_daily")}</option><option value="weekly">{t("ui.digest_weekly")}</option></select>
@@ -201,12 +201,12 @@ function CustomFieldsAdmin() {
   return (
     <div className="stack">
       {q.data?.fields.length === 0 && <Empty />}
-      <div className="table-wrap"><table><tbody>
+      <TableWrap label={t("ui.custom_fields")}><table><tbody>
         {q.data?.fields.map((d) => (
           <tr key={d.id}><td><strong>{d.name}</strong></td><td>{t(`ui.type_${d.type}` as never)}</td><td className="small muted">{d.options.filter((o) => !o.archived).map((o) => o.label).join(", ")}</td>
             <td><Btn small kind="danger" onClick={async () => { await api(`/api/orgs/${orgId}/custom-fields/${d.id}`, { method: "DELETE" }).catch((e) => toast(err(e), "error")); q.reload(); }}>{t("ui.archive")}</Btn></td></tr>
         ))}
-      </tbody></table></div>
+      </tbody></table></TableWrap>
       <form className="card" onSubmit={create}>
         <h2>{t("ui.new_field")}</h2>
         <div className="grid cols-2">

@@ -52,6 +52,7 @@ const ORG_PAGES: [string, string][] = [
   ["calendar", "/tasks?view=calendar"],
   ["timeline", "/tasks?view=timeline"],
   ["dashboard", "/dashboard"],
+  ["recurring tasks", "/recurring"],
   ["members", "/members"],
   ["structure", "/structure"],
   ["settings", "/settings"],
@@ -173,6 +174,13 @@ test.describe("accessibility (axe, WCAG 2.0/2.1 A and AA)", () => {
     await expect(page.getByRole("dialog").getByRole("heading", { name: "Design the homepage", level: 2 })).toBeVisible();
     await page.waitForLoadState("networkidle");
     await expectAccessible(page, "task drawer");
+    await page.keyboard.press("Escape");
+
+    await page.goto(`/o/${acme()}/recurring`);
+    await page.getByRole("button", { name: /New recurring task/ }).click();
+    await expect(page.getByRole("dialog", { name: "New recurring task" })).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    await expectAccessible(page, "new recurring task dialog");
   });
 
   test("keyboard: the dialog traps focus, Escape closes it and focus returns to where it was", async ({ page }) => {

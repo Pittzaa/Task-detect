@@ -245,7 +245,7 @@ export async function listSeries(s: TenantSession, projectId: string) {
   const scope = await projectScope(s, projectId);
   if (!scope || !can(s.principal, "task.read", scope)) throw notFound();
   return s.tx
-    .select({ id: recurrenceSeries.id, title: recurrenceSeries.title, rule: recurrenceSeries.rule, startDate: recurrenceSeries.startDate, endDate: recurrenceSeries.endDate, maxOccurrences: recurrenceSeries.maxOccurrences, active: recurrenceSeries.active, timezone: recurrenceSeries.timezone, generatedThrough: recurrenceSeries.generatedThrough })
+    .select({ id: recurrenceSeries.id, title: recurrenceSeries.title, description: recurrenceSeries.description, priority: recurrenceSeries.priority, primaryAssigneeId: recurrenceSeries.primaryAssigneeId, reminderDaysBefore: recurrenceSeries.reminderDaysBefore, dueOffsetDays: recurrenceSeries.dueOffsetDays, rule: recurrenceSeries.rule, startDate: recurrenceSeries.startDate, endDate: recurrenceSeries.endDate, maxOccurrences: recurrenceSeries.maxOccurrences, active: recurrenceSeries.active, timezone: recurrenceSeries.timezone, generatedThrough: recurrenceSeries.generatedThrough })
     .from(recurrenceSeries)
     .where(and(eq(recurrenceSeries.orgId, s.orgId), eq(recurrenceSeries.projectId, projectId), isNull(recurrenceSeries.deletedAt)))
     .orderBy(asc(recurrenceSeries.createdAt))

@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { PERMISSIONS } from "@/authz/permissions";
 import { api } from "@/ui/api";
-import { Btn, Empty, ErrorNote, Field, Loading, Notice, Tabs, useToast } from "@/ui/components";
+import { Btn, Empty, ErrorNote, Field, Loading, Notice, TableWrap, Tabs, useToast } from "@/ui/components";
 import { useQuery } from "@/ui/hooks";
 import { useI18n } from "@/ui/i18n";
 import { useOrg } from "@/ui/org";
@@ -55,7 +55,7 @@ export default function MembersPage() {
               ))}
             </section>
           )}
-          <div className="table-wrap">
+          <TableWrap label={t("ui.members")}>
             <table>
               <thead><tr><th>{t("ui.name")}</th><th>{t("ui.email")}</th><th>{t("ui.status")}</th><th>{t("ui.roles")}</th><th /></tr></thead>
               <tbody>
@@ -74,7 +74,7 @@ export default function MembersPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableWrap>
         </>
       )}
       {tab === "invites" && (
@@ -90,12 +90,12 @@ export default function MembersPage() {
             </form>
           )}
           {invites.data?.invitations.length === 0 && <Empty />}
-          <div className="table-wrap"><table><tbody>
+          <TableWrap label={t("ui.invitations")}><table><tbody>
             {invites.data?.invitations.map((i) => (
               <tr key={i.id}><td>{i.email}</td><td className="muted">{i.acceptedAt ? t("ui.invite_accepted") : i.revokedAt ? t("ui.status_label_revoked") : date(i.expiresAt.slice(0, 10))}</td>
                 <td>{!i.acceptedAt && !i.revokedAt && <Btn small onClick={() => void run(() => api(`/api/orgs/${orgId}/invitations/${i.id}`, { method: "DELETE" }))}>{t("ui.revoke_invite")}</Btn>}</td></tr>
             ))}
-          </tbody></table></div>
+          </tbody></table></TableWrap>
         </>
       )}
       {tab === "roles" && <RolesTab orgId={orgId} roles={roles.data?.roles ?? []} canManage={!!can.manageRoles} onChanged={roles.reload} />}

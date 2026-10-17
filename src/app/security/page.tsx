@@ -4,7 +4,7 @@ import QRCode from "qrcode";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, authApi } from "@/ui/api";
-import { Btn, ErrorNote, Field, Loading, Notice, useToast } from "@/ui/components";
+import { Btn, ErrorNote, Field, Loading, Notice, TableWrap, useToast } from "@/ui/components";
 import { useQuery } from "@/ui/hooks";
 import { useI18n } from "@/ui/i18n";
 
@@ -90,7 +90,7 @@ export default function SecurityPage() {
       <section className="card" aria-labelledby="h-sessions">
         <div className="row between"><h2 id="h-sessions">{t("ui.sessions")}</h2><Btn small onClick={() => void revokeOthers()}>{t("ui.revoke_others")}</Btn></div>
         {sessions.error ? <ErrorNote error={sessions.error} onRetry={sessions.reload} /> : (
-          <div className="table-wrap"><table>
+          <TableWrap label={t("ui.sessions")}><table>
             <tbody>
               {(sessions.data ?? []).map((s) => (
                 <tr key={s.id}>
@@ -99,7 +99,7 @@ export default function SecurityPage() {
                 </tr>
               ))}
             </tbody>
-          </table></div>
+          </table></TableWrap>
         )}
       </section>
     </main>

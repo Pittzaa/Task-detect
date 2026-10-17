@@ -29,7 +29,8 @@ export async function getContext(s: TenantSession) {
   // Scoped roles (a team or project) can create tasks without any organization-wide grant, so this is "anywhere", not "org level".
   const createsSomewhere = s.principal.assignments.some((a) => a.permissions.has("task.create"));
   const readsSomething = s.principal.assignments.some((a) => a.permissions.has("task.read"));
-  const flagsOut: Record<string, boolean> = { ...flags, createTask: createsSomewhere };
+  const managesSeriesSomewhere = s.principal.assignments.some((a) => a.permissions.has("series.manage"));
+  const flagsOut: Record<string, boolean> = { ...flags, createTask: createsSomewhere, manageSeries: managesSeriesSomewhere };
   return { org, can: flagsOut, hasAnyAccess: readsSomething };
 }
 

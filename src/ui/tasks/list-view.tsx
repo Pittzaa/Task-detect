@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { TASK_PRIORITIES, TASK_STATUSES, type TaskPriority, type TaskStatus } from "@/domain/workflow";
 import { api, ApiError } from "../api";
-import { Btn, Empty, ErrorNote, Loading, Notice, PriorityBadge, StatusBadge, useToast } from "../components";
+import { Btn, Empty, ErrorNote, Loading, Notice, PriorityBadge, StatusBadge, TableWrap, useToast } from "../components";
 import { useQuery } from "../hooks";
 import { useI18n } from "../i18n";
 import { useOrg } from "../org";
@@ -84,7 +84,7 @@ export function ListView({ filters, projects, onOpen, version, onChanged }: { fi
         </Notice>
       )}
       {rows.length === 0 ? <Empty /> : (
-        <div className="table-wrap">
+        <TableWrap label={t("ui.tasks")}>
           <table>
             <thead>
               <tr>
@@ -110,7 +110,7 @@ export function ListView({ filters, projects, onOpen, version, onChanged }: { fi
               ))}
             </tbody>
           </table>
-        </div>
+        </TableWrap>
       )}
       {hasMore && <div><Btn onClick={() => void loadMore()} disabled={loadingMore}>{t("ui.load_more")}</Btn></div>}
     </div>

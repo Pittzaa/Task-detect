@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { api } from "@/ui/api";
-import { Btn, Empty, ErrorNote, Loading } from "@/ui/components";
+import { Btn, Empty, ErrorNote, Loading, TableWrap } from "@/ui/components";
 import { useQuery } from "@/ui/hooks";
 import { useI18n } from "@/ui/i18n";
 import { useOrg } from "@/ui/org";
@@ -22,10 +22,10 @@ export default function AuditPage() {
       {q.error && <ErrorNote error={q.error} onRetry={q.reload} />}
       {q.data && q.data.items.length === 0 && <Empty />}
       {q.data && q.data.items.length > 0 && (
-        <div className="table-wrap"><table>
+        <TableWrap label={t("ui.audit_log")}><table>
           <thead><tr><th>{t("ui.when")}</th><th>{t("ui.who")}</th><th>{t("ui.action")}</th><th /></tr></thead>
           <tbody>{q.data.items.map((r) => <tr key={r.id}><td className="small">{instant(r.createdAt)}</td><td>{r.actorName ?? "—"}</td><td><code>{r.action}</code></td><td className="small muted">{Object.keys(r.metadata).length ? JSON.stringify(r.metadata) : ""}</td></tr>)}</tbody>
-        </table></div>
+        </table></TableWrap>
       )}
       <div className="row"><Btn disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}>{t("ui.previous")}</Btn><Btn disabled={!q.data?.hasMore} onClick={() => setOffset(offset + 50)}>{t("ui.next")}</Btn></div>
     </div>

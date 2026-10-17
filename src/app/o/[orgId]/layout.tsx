@@ -51,6 +51,7 @@ export default function OrgLayout({ children }: { children: ReactNode }) {
           {link("/my-tasks", t("ui.my_tasks"))}
           {link("/tasks", t("ui.tasks"))}
           {link("/dashboard", t("ui.dashboard"))}
+          {can.manageSeries && link("/recurring", t("ui.recurring_tasks"))}
           {(can.manageMembers || can.approveMembers || can.manageRoles) && <>{<div className="group">{t("ui.settings")}</div>}{link("/members", t("ui.members"))}</>}
           {(can.manageDepartments || can.manageTeams || can.createProject) && link("/structure", t("ui.structure"))}
           {link("/settings", t("ui.settings"))}

@@ -12,6 +12,14 @@ export function Loading() {
   return <p className="muted"><Spinner label={t("ui.loading")} /> {t("ui.loading")}</p>;
 }
 
+/**
+ * Horizontally scrollable table container. It is focusable and labelled so keyboard users can scroll it
+ * (a scrollable region with nothing focusable inside is otherwise unreachable without a mouse).
+ */
+export function TableWrap({ label, children }: { label: string; children: ReactNode }) {
+  return <div className="table-wrap" role="region" aria-label={label} tabIndex={0}>{children}</div>;
+}
+
 export function Empty({ children }: { children?: ReactNode }) {
   const { t } = useI18n();
   return <p className="muted" style={{ padding: "1rem 0" }}>{children ?? t("ui.empty")}</p>;

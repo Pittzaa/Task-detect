@@ -22,7 +22,12 @@
     "test:e2e": "pnpm build && playwright test",
     "e2e:setup": "tsx scripts/e2e-setup.ts",
     "backup:restore-test": "tsx scripts/backup-restore-test.ts",
-    "verify:attachments": "tsx scripts/verify-attachments.ts"
+    "verify:attachments": "tsx scripts/verify-attachments.ts",
+    "verify:database": "tsx scripts/verify-database.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "rotate:key": "tsx scripts/rotate-encryption-key.ts",
+    "docs:generate": "tsx scripts/gen-docs.ts",
+    "docs:erd": "tsx scripts/gen-erd.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.2.0",
@@ -52,5 +57,10 @@
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^5.0.5"
+  },
+  "pnpm": {
+    "overrides": {
+      "@esbuild-kit/core-utils>esbuild": "0.25.12"
+    }
   }
 }
