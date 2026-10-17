@@ -15,4 +15,4 @@ export const POST = (req: Request, { params }: P) =>
   handle(req, async (c) => {
     const body = await readJson(req, createTaskBody);
     return c.tenant((await params).orgId, (s) => createTask(s, body));
-  }, { status: 201 });
+  }, { status: 201, limit: { name: "task-create", windowSeconds: 60, max: 120 } });

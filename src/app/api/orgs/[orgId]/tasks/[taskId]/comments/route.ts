@@ -11,4 +11,4 @@ export const POST = (req: Request, { params }: P) =>
     const p = await params;
     const body = await readJson(req, z.object({ body: z.string().min(1).max(10_000), mentionUserIds: z.array(uuid).max(20).optional() }).strict());
     return c.tenant(p.orgId, (s) => addComment(s, uuid.parse(p.taskId), body));
-  }, { status: 201 });
+  }, { status: 201, limit: { name: "comment", windowSeconds: 60, max: 60 } });

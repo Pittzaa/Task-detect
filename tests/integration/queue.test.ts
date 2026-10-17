@@ -4,12 +4,13 @@ import { jobs } from "@/db/schema";
 import { backoffSeconds, claimJobs, completeJob, enqueue, failJob, queueStats } from "@/jobs/queue";
 import { Deferred, PermanentFailure, runWorker, type JobContext, type Registry } from "@/jobs/worker";
 import { createCaptureSender } from "@/integrations/email";
+import { createFsStore } from "@/integrations/storage/fs";
 import { connect } from "./helpers";
 
 const c = connect();
 afterAll(() => c.close());
 
-const ctxAt = (now: () => Date): JobContext => ({ db: c.app, email: createCaptureSender(), appUrl: "http://localhost:3000", encryptionKeys: [], fetchImpl: fetch, now });
+const ctxAt = (now: () => Date): JobContext => ({ db: c.app, email: createCaptureSender(), store: createFsStore(".data/test-uploads"), appUrl: "http://localhost:3000", encryptionKeys: [], fetchImpl: fetch, now });
 const T0 = new Date("2026-06-10T10:00:00Z");
 const at = (secs: number) => new Date(T0.getTime() + secs * 1000);
 let kind = "";

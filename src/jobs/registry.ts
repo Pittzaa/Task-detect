@@ -4,6 +4,7 @@ import { discordSend } from "./handlers/discord";
 import { notificationEmail } from "./handlers/email";
 import { outboxProcess } from "./handlers/outbox";
 import { remindersScan } from "./handlers/reminders";
+import { retentionPurge, storageOrphans } from "./handlers/retention";
 import { seriesGenerate } from "./handlers/series";
 import type { Registry } from "./worker";
 
@@ -18,4 +19,6 @@ export const registry: Registry = {
   "calendar.resync": calendarResync,
   "calendar.cleanup": calendarCleanup,
   "calendar.reconcile": calendarReconcile,
+  "retention.purge": retentionPurge,
+  "storage.orphans": storageOrphans,
 };

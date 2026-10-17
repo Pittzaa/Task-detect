@@ -3,6 +3,7 @@ import { AppError, notFound, unauthenticated, validation } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { withTenant, type TenantSession } from "@/data/tenant";
 import type { Db } from "@/db/client";
+import { consumeRateLimit } from "./rate-limit";
 import { getRuntime, type Runtime } from "./runtime";
 
 export interface ApiUser {
@@ -61,12 +62,19 @@ export function json(data: unknown, status = 200): Response {
   });
 }
 
-function errorResponse(e: unknown): Response {
+const REQUEST_ID = /^[A-Za-z0-9-]{8,64}$/;
+/** A caller-supplied id is only kept if it is a harmless token (log-injection safe); otherwise a fresh one is made. */
+export function requestIdFor(req: Request): string {
+  const given = req.headers.get("x-request-id");
+  return given && REQUEST_ID.test(given) ? given : crypto.randomUUID();
+}
+
+function errorResponse(e: unknown, requestId?: string): Response {
   if (e instanceof ZodError) {
     return json({ error: { code: "VALIDATION", message: "Invalid input", issues: e.issues.map((i) => ({ path: i.path.join("."), message: i.message })) } }, 422);
   }
   if (e instanceof AppError) return json({ error: { code: e.code, message: e.message, ...(e.data ? { data: e.data } : {}) } }, e.status);
-  logger.error({ err: e instanceof Error ? e.message : "unknown" }, "unhandled API error");
+  logger.error({ requestId, err: e instanceof Error ? e.message : "unknown" }, "unhandled API error");
   return json({ error: { code: "INTERNAL", message: "Internal error" } }, 500);
 }
 
@@ -74,13 +82,25 @@ function errorResponse(e: unknown): Response {
  * Wraps a route handler: same-origin check, authentication, uniform error mapping.
  * `auth: false` is for the few public endpoints and must be a deliberate choice.
  */
-export async function handle(req: Request, fn: (c: ApiContext) => Promise<unknown>, opts: { status?: number } = {}): Promise<Response> {
+export async function handle(
+  req: Request,
+  fn: (c: ApiContext) => Promise<unknown>,
+  opts: { status?: number; /** Per-user fixed-window limit for abusable endpoints, in addition to the auth-layer limits. */ limit?: { name: string; windowSeconds: number; max: number } } = {},
+): Promise<Response> {
+  const requestId = requestIdFor(req);
+  const res = await handleInner(req, fn, opts, requestId);
+  try { res.headers.set("x-request-id", requestId); } catch { /* immutable response from a lower layer: the id is only a convenience */ }
+  return res;
+}
+
+async function handleInner(req: Request, fn: (c: ApiContext) => Promise<unknown>, opts: { status?: number; limit?: { name: string; windowSeconds: number; max: number } }, requestId: string): Promise<Response> {
   try {
     const rt = getRuntime();
     assertSameOrigin(req, rt.appUrl);
     const session = await rt.auth.api.getSession({ headers: req.headers });
     if (!session) throw unauthenticated();
     const u = session.user as unknown as ApiUser;
+    if (opts.limit) await consumeRateLimit(rt.db, `${opts.limit.name}:${u.id}`, opts.limit.windowSeconds, opts.limit.max);
     const user: ApiUser = { id: u.id, email: u.email, emailVerified: u.emailVerified, name: u.name, locale: u.locale ?? "th", timezone: u.timezone ?? "Asia/Bangkok" };
     const ctx: ApiContext = {
       req, rt, db: rt.db, user,
@@ -93,6 +113,6 @@ export async function handle(req: Request, fn: (c: ApiContext) => Promise<unknow
     if (result instanceof Response) return result;
     return json(result ?? { ok: true }, opts.status ?? 200);
   } catch (e) {
-    return errorResponse(e);
+    return errorResponse(e, requestId);
   }
 }

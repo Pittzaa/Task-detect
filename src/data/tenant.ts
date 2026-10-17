@@ -5,6 +5,7 @@ import { AppError, forbidden, notFound } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import type { Db, Tx } from "@/db/client";
 import { auditLogs, memberships, rolePermissions, roleAssignments } from "@/db/schema";
+import { assertRlsEnforced } from "@/db/rls-guard";
 
 export interface TenantSession {
   tx: Tx;
@@ -79,6 +80,7 @@ export async function withTenant<T>(
   auth: { userId: string; orgId: string },
   fn: (s: TenantSession) => Promise<T>,
 ): Promise<T> {
+  await assertRlsEnforced(db);
   let denied: { permission: string } | undefined;
   try {
     return await db.transaction(async (tx) => {

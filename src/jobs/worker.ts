@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@/db/client";
 import type { EmailSender } from "@/integrations/email";
+import type { ObjectStore } from "@/integrations/storage";
 import { logger } from "@/lib/logger";
 import { claimJobs, completeJob, deferJob, failJob, type JobRow } from "./queue";
 
@@ -21,6 +22,8 @@ export class PermanentFailure extends Error {
 export interface JobContext {
   db: Db;
   email: EmailSender;
+  /** Private attachment storage (retention and orphan cleanup delete objects). */
+  store: ObjectStore;
   appUrl: string;
   /** Secrets for at-rest encryption, current first. */
   encryptionKeys: string[];

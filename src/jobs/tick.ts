@@ -10,6 +10,8 @@ const PERIODIC: [string, number][] = [
   ["digest.run", 3600],
   ["series.generate", 3600],
   ["calendar.reconcile", 86_400],
+  ["retention.purge", 86_400],
+  ["storage.orphans", 7 * 86_400],
 ];
 
 /**

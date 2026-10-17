@@ -6,4 +6,4 @@ export const GET = (req: Request, { params }: { params: Promise<{ orgId: string 
   handle(req, async (c) => {
     const { q } = readQuery(req, z.object({ q: z.string().max(100) }));
     return c.tenant((await params).orgId, (s) => searchAll(s, q));
-  });
+  }, { limit: { name: "search", windowSeconds: 60, max: 120 } });

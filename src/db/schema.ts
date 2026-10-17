@@ -229,7 +229,7 @@ export const auditLogs = pgTable(
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
   },
-  (t) => [index("audit_logs_org_created_idx").on(t.orgId, t.createdAt)],
+  (t) => [index("audit_logs_org_created_idx").on(t.orgId, t.createdAt), index("audit_logs_created_idx").on(t.createdAt)],
 );
 
 // ---------------------------------------------------------------------------------------------
@@ -383,6 +383,8 @@ export const tasks = pgTable(
     index("tasks_assignee_idx").on(t.orgId, t.primaryAssigneeId, t.status).where(sql`${t.deletedAt} is null`),
     index("tasks_due_idx").on(t.orgId, t.dueDate).where(sql`${t.deletedAt} is null`),
     index("tasks_parent_idx").on(t.orgId, t.parentId),
+    // Retention: finds soft-deleted rows that are due for permanent removal.
+    index("tasks_trash_idx").on(t.deletedAt).where(sql`${t.deletedAt} is not null`),
   ],
 );
 
@@ -511,6 +513,7 @@ export const attachments = pgTable(
     foreignKey({ name: "attachments_task_fk", columns: [t.orgId, t.taskId], foreignColumns: [tasks.orgId, tasks.id] }),
     check("attachments_size", sql`${t.sizeBytes} > 0`),
     index("attachments_task_idx").on(t.orgId, t.taskId),
+    index("attachments_trash_idx").on(t.deletedAt).where(sql`${t.deletedAt} is not null`),
   ],
 );
 
@@ -530,7 +533,10 @@ export const outboxEvents = pgTable(
     processedAt: timestamp("processed_at", { withTimezone: true }),
     attempts: integer("attempts").notNull().default(0),
   },
-  (t) => [index("outbox_events_pending_idx").on(t.createdAt).where(sql`${t.processedAt} is null`)],
+  (t) => [
+    index("outbox_events_pending_idx").on(t.createdAt).where(sql`${t.processedAt} is null`),
+    index("outbox_events_processed_idx").on(t.processedAt).where(sql`${t.processedAt} is not null`),
+  ],
 );
 
 // ---------------------------------------------------------------------------------------------
@@ -698,6 +704,7 @@ export const jobs = pgTable(
     uniqueIndex("jobs_dedupe_uq").on(t.dedupeKey).where(sql`${t.dedupeKey} is not null`),
     index("jobs_ready_idx").on(t.runAt).where(sql`${t.status} in ('pending','running')`),
     index("jobs_org_status_idx").on(t.orgId, t.status),
+    index("jobs_finished_idx").on(t.finishedAt).where(sql`${t.status} in ('succeeded','dead')`),
   ],
 );
 
@@ -730,6 +737,7 @@ export const notifications = pgTable(
     foreignKey({ name: "notifications_member_fk", columns: [t.orgId, t.userId], foreignColumns: [memberships.orgId, memberships.userId] }),
     uniqueIndex("notifications_dedupe_uq").on(t.userId, t.dedupeKey),
     index("notifications_user_idx").on(t.orgId, t.userId, t.createdAt),
+    index("notifications_org_created_idx").on(t.orgId, t.createdAt),
   ],
 );
 
@@ -781,7 +789,7 @@ export const deliveryAttempts = pgTable(
     detail: text("detail"),
     createdAt: createdAt(),
   },
-  (t) => [index("delivery_attempts_subject_idx").on(t.orgId, t.subjectId, t.createdAt)],
+  (t) => [index("delivery_attempts_subject_idx").on(t.orgId, t.subjectId, t.createdAt), index("delivery_attempts_created_idx").on(t.orgId, t.createdAt)],
 );
 
 export const digestLog = pgTable(

@@ -1,5 +1,6 @@
 import { getEnv, tierOf } from "@/config/env";
 import { createDb, type Db } from "@/db/client";
+import { enableRlsGuard } from "@/db/rls-guard";
 import { createFileSender, createLogSender, createResendSender, type EmailSender } from "@/integrations/email";
 import { createBlobStore } from "@/integrations/storage/blob";
 import { createFsStore } from "@/integrations/storage/fs";
@@ -31,6 +32,8 @@ export function getRuntime(): Runtime {
   const env = getEnv();
   const tier = tierOf(env);
   const { db } = createDb(env.DATABASE_URL);
+  // Production-like tiers refuse to serve tenant data through a role that bypasses row-level security.
+  enableRlsGuard(tier === "production" || tier === "staging");
   const email = env.EMAIL_SINK_FILE
     ? createFileSender(env.EMAIL_SINK_FILE) // development/E2E only; rejected in production by env validation
     : env.RESEND_API_KEY && env.EMAIL_FROM
@@ -57,7 +60,7 @@ export function getRuntime(): Runtime {
     : undefined;
   const rt: Runtime = {
     db, auth, email, store, appUrl: env.APP_URL, encryptionKeys, google: googleCfg ? createGoogleClient(googleCfg) : undefined, googleSignIn: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
-    jobContext: () => ({ db, email, appUrl: env.APP_URL, encryptionKeys, fetchImpl: fetch, google: googleCfg, now: () => new Date() }),
+    jobContext: () => ({ db, email, store, appUrl: env.APP_URL, encryptionKeys, fetchImpl: fetch, google: googleCfg, now: () => new Date() }),
   };
   g[KEY] = rt;
   return rt;

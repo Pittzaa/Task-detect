@@ -14,7 +14,7 @@ export function makeAuthApp(db: Db, opts: { rateLimit?: boolean } = {}) {
   const email = createCaptureSender();
   const auth: Auth = createAuth({ db, baseURL: BASE, secret: "test-secret-test-secret-test-secret-00", email, rateLimit: opts.rateLimit ?? false });
   const store = createFsStore(mkdtempSync(path.join(tmpdir(), "tt-uploads-")));
-  const runtime = { db, auth, email, store, appUrl: BASE, encryptionKeys: [], jobContext: () => ({ db, email, appUrl: BASE, encryptionKeys: [] as string[], fetchImpl: fetch, now: () => new Date() }) };
+  const runtime = { db, auth, email, store, appUrl: BASE, encryptionKeys: [], jobContext: () => ({ db, email, store, appUrl: BASE, encryptionKeys: [] as string[], fetchImpl: fetch, now: () => new Date() }) };
   setRuntimeForTests(runtime);
   return { auth, email, store, runtime };
 }

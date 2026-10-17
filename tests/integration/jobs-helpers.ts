@@ -3,6 +3,8 @@ import { eq, isNull } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { outboxEvents } from "@/db/schema";
 import { createCaptureSender } from "@/integrations/email";
+import type { ObjectStore } from "@/integrations/storage";
+import { createFsStore } from "@/integrations/storage/fs";
 import { outboxProcess } from "@/jobs/handlers/outbox";
 import { registry } from "@/jobs/registry";
 import { runWorker, type JobContext } from "@/jobs/worker";
@@ -21,10 +23,10 @@ export function liveClock(): Clock {
   };
 }
 
-export function makeJobCtx(db: Db, o: { clock?: Clock; email?: ReturnType<typeof createCaptureSender>; fetchImpl?: typeof fetch; google?: JobContext["google"] } = {}) {
+export function makeJobCtx(db: Db, o: { clock?: Clock; store?: ObjectStore; email?: ReturnType<typeof createCaptureSender>; fetchImpl?: typeof fetch; google?: JobContext["google"] } = {}) {
   const clock = o.clock ?? liveClock();
   const email = o.email ?? createCaptureSender();
-  const ctx: JobContext = { db, email, appUrl: "http://localhost:3000", encryptionKeys: [KEY], fetchImpl: o.fetchImpl ?? fetch, google: o.google, now: () => clock.now };
+  const ctx: JobContext = { db, email, store: o.store ?? createFsStore(".data/test-uploads"), appUrl: "http://localhost:3000", encryptionKeys: [KEY], fetchImpl: o.fetchImpl ?? fetch, google: o.google, now: () => clock.now };
   return { ctx, clock, email };
 }
 

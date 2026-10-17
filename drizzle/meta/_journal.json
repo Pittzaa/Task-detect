@@ -71,6 +71,20 @@
       "when": 1792257214049,
       "tag": "0009_jobs_notifications_integrations_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792261101290,
+      "tag": "0010_retention_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792261112371,
+      "tag": "0011_retention_controls",
+      "breakpoints": true
     }
   ]
 }

@@ -12,3 +12,4 @@ coverage
 .data/
 test-results/
 playwright-report/
+.data/backup/
