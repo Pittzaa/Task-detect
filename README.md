@@ -15,7 +15,8 @@ audit log 90 วัน, งานเบื้องหลังที่ไม�
 ## ติดตั้งและ deploy (เริ่มที่นี่)
 
 ใช้ **Vercel** (โฮสต์ + ตัวตั้งเวลา + ที่เก็บไฟล์แนบ Blob) + **Neon** (ฐานข้อมูล) + **Resend** (ส่งอีเมล)
-คู่มือทีละขั้นละเอียดพร้อมเหตุผล: **[docs/DEPLOYMENT_TH.md](docs/DEPLOYMENT_TH.md)** · เอกสารอ้างอิง: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) · ตัวแปรทั้งหมด: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md)
+**จะ host บน VPS ของตัวเองแทน Vercel + Neon: ดู [README_VPS.md](README_VPS.md)** (PostgreSQL + Caddy + systemd + cron ในเครื่องเดียว)
+คู่มือทีละขั้นละเอียดพร้อมเหตุผล (แบบ Vercel + Neon): **[docs/DEPLOYMENT_TH.md](docs/DEPLOYMENT_TH.md)** · เอกสารอ้างอิง: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) · ตัวแปรทั้งหมด: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md)
 
 สรุปลำดับ (ทำจากบนลงล่าง อย่าข้ามขั้น):
 
@@ -130,7 +131,8 @@ tests/            unit · integration · e2e        docs/      เอกสา�
 ## เอกสาร
 | เอกสาร | เนื้อหา |
 |---|---|
-| [DEPLOYMENT_TH](docs/DEPLOYMENT_TH.md) | **คู่มือ deploy ทีละขั้น** (Neon → Resend → Blob → Vercel → ตรวจสอบ → เปิดใช้งาน) |
+| [README_VPS](README_VPS.md) | **คู่มือ host บน VPS ของตัวเอง** (PostgreSQL, Caddy HTTPS, systemd, cron, สำรองข้อมูล, อัปเดต) |
+| [DEPLOYMENT_TH](docs/DEPLOYMENT_TH.md) | **คู่มือ deploy ทีละขั้น (Vercel + Neon)** (Neon → Resend → Blob → Vercel → ตรวจสอบ → เปิดใช้งาน) |
 | [DEPLOYMENT](docs/DEPLOYMENT.md) | เอกสารอ้างอิง deploy: ข้อจำกัดของแผน, Vercel, Neon, Resend, Google, Blob, สคริปต์ตรวจสอบ, รายการก่อนเปิดใช้, ย้อนกลับ |
 | [ENVIRONMENT](docs/ENVIRONMENT.md) | ตัวแปรทุกตัว ใช้ที่ไหน สร้างอย่างไร |
 | [READINESS_REPORT](docs/READINESS_REPORT.md) | ผลที่ตรวจแล้ว ความเสี่ยงที่เหลือ สิ่งที่ต้องทำก่อนเปิดใช้ |

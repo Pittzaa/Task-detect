@@ -2,7 +2,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import path from "node:path";
 import { assertSafeKey, type ObjectStore } from "./index";
 
-/** Filesystem store for local development and tests. Not for production (Vercel's filesystem is ephemeral). */
+/** Filesystem store: local development, tests, and self-hosting on a server with a persistent disk (ATTACHMENTS_DIR). Not for serverless hosting, whose disk is ephemeral. */
 export function createFsStore(root: string): ObjectStore {
   const resolve = (key: string) => {
     assertSafeKey(key);
@@ -13,8 +13,8 @@ export function createFsStore(root: string): ObjectStore {
   return {
     async put(key, data) {
       const file = resolve(key);
-      await mkdir(path.dirname(file), { recursive: true });
-      await writeFile(file, data, { flag: "wx" });
+      await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+      await writeFile(file, data, { flag: "wx", mode: 0o600 });
     },
     async get(key) {
       const file = resolve(key);

@@ -36,8 +36,8 @@ describe("documentation stays in step with the code", () => {
     for (const kind of Object.keys(registry)) expect(doc, kind).toContain(kind.replace(/^calendar\..*/, "calendar."));
   });
 
-  it("every relative link in README.md and docs/*.md points at a file that exists", () => {
-    const files = ["README.md", ...readdirSync("docs").filter((f) => f.endsWith(".md")).map((f) => path.join("docs", f))];
+  it("every relative link in README.md, README_VPS.md and docs/*.md points at a file that exists", () => {
+    const files = ["README.md", "README_VPS.md", ...readdirSync("docs").filter((f) => f.endsWith(".md")).map((f) => path.join("docs", f))];
     const broken: string[] = [];
     for (const file of files) {
       for (const m of read(file).matchAll(/\]\((?!https?:|#|mailto:)([^)\s#]+)(?:#[^)]*)?\)/g)) {

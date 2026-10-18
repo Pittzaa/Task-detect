@@ -7,12 +7,12 @@ import { verifyAttachments } from "../src/ops/verify-attachments";
 /**
  * Database <-> object storage consistency check (docs/BACKUP_RESTORE.md). Read-only.
  *   tsx scripts/verify-attachments.ts [--hashes] [--org <uuid>]
- * Uses DATABASE_URL (the runtime role) and BLOB_READ_WRITE_TOKEN, or the local .data/uploads store when no token is set.
+ * Uses DATABASE_URL (the runtime role) and BLOB_READ_WRITE_TOKEN or ATTACHMENTS_DIR, or the local .data/uploads store when neither is set.
  */
 const env = getEnv();
 const { db, close } = createDb(env.DATABASE_URL);
-const store = env.BLOB_READ_WRITE_TOKEN ? createBlobStore(env.BLOB_READ_WRITE_TOKEN) : createFsStore(".data/uploads");
-console.error(`store checked: ${env.BLOB_READ_WRITE_TOKEN ? "Vercel Blob (BLOB_READ_WRITE_TOKEN)" : "local folder .data/uploads (BLOB_READ_WRITE_TOKEN is not set; this is NOT the production store)"}`);
+const store = env.BLOB_READ_WRITE_TOKEN ? createBlobStore(env.BLOB_READ_WRITE_TOKEN) : createFsStore(env.ATTACHMENTS_DIR ?? ".data/uploads");
+console.error(`store checked: ${env.BLOB_READ_WRITE_TOKEN ? "Vercel Blob (BLOB_READ_WRITE_TOKEN)" : env.ATTACHMENTS_DIR ? `folder ${env.ATTACHMENTS_DIR} (ATTACHMENTS_DIR)` : "local folder .data/uploads (neither BLOB_READ_WRITE_TOKEN nor ATTACHMENTS_DIR is set; this is NOT the production store)"}`);
 const orgIdx = process.argv.indexOf("--org");
 verifyAttachments(db, store, { hashes: process.argv.includes("--hashes"), orgId: orgIdx > -1 ? process.argv[orgIdx + 1] : undefined })
   .then(async (r) => {

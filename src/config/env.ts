@@ -25,6 +25,8 @@ const schema = z
     GOOGLE_CALENDAR_CLIENT_SECRET: optional,
     CRON_SECRET: z.string().min(16).optional(),
     BLOB_READ_WRITE_TOKEN: optional,
+    // Self-hosting (a VPS): keep attachment files in this directory (absolute path) instead of Vercel Blob. Back it up with the database.
+    ATTACHMENTS_DIR: optional,
     // "off" disables direct browser -> Blob uploads (files are then limited to 4 MB through the server). A kill switch for a path
     // that has not been exercised against a real Blob store by the author.
     DIRECT_UPLOADS: z.enum(["on", "off"]).optional(),
@@ -36,6 +38,8 @@ const schema = z
   })
   .superRefine((env, ctx) => {
     const tier = env.APP_ENV ?? (env.NODE_ENV === "production" ? "production" : env.NODE_ENV);
+    if (env.ATTACHMENTS_DIR && !/^(\/|[A-Za-z]:[\\/])/.test(env.ATTACHMENTS_DIR)) ctx.addIssue({ code: "custom", path: ["ATTACHMENTS_DIR"], message: "must be an absolute path" });
+    if (env.ATTACHMENTS_DIR && env.BLOB_READ_WRITE_TOKEN) ctx.addIssue({ code: "custom", path: ["ATTACHMENTS_DIR"], message: "set either BLOB_READ_WRITE_TOKEN or ATTACHMENTS_DIR, not both" });
     if (env.EMAIL_SINK_FILE && tier !== "e2e" && tier !== "development" && tier !== "test") ctx.addIssue({ code: "custom", path: ["EMAIL_SINK_FILE"], message: "only allowed in development, test and e2e" });
     if (tier !== "production" && tier !== "staging") {
       // The relaxed tiers turn off the production safeguards (row-level-security check, https, the e-mail sink, rate limits, a built-in

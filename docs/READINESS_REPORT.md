@@ -5,7 +5,7 @@ This report separates what was **verified** (command and result given), what was
 
 ## 1. Verdict
 
-* **As software, locally:** the application builds, passes every automated check that exists (723 unit/integration tests, 84 browser tests, static analysis, dependency audit for shipped code, a restore drill, a local load test, database and smoke verifications), and the final passes found and fixed the defects listed in §5.
+* **As software, locally:** the application builds, passes every automated check that exists (728 unit/integration tests, 84 browser tests, static analysis, dependency audit for shipped code, a restore drill, a local load test, database and smoke verifications), and the final passes found and fixed the defects listed in §5.
 * **As a service you can launch today: no.** It has **never run on Vercel, Neon, Resend, Google, Discord or Vercel Blob**, and no restore has been tested on a real Neon plan. Those are explicit **go-live blockers** (§4). Everything else is in good shape to hand over, with the limitations listed in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 
 ## 2. Commands run and their results
@@ -16,7 +16,7 @@ All against PostgreSQL 16.15 on a local cluster, Node 22.22, pnpm 10.28, Chromiu
 |---|---|
 | `pnpm lint` | clean (no errors, no warnings) |
 | `pnpm typecheck` | clean |
-| `pnpm test:unit` | **274 / 274 passed** |
+| `pnpm test:unit` | **279 / 279 passed** |
 | `TEST_DATABASE_URL=… pnpm test:integration` | **449 / 449 passed** |
 | `pnpm build` | compiled successfully (all pages, 65 API routes, proxy, instrumentation) |
 | `pnpm exec playwright test tests/e2e` (fresh database, Chromium) | **84 / 84 passed** (10 spec files, ≈ 3.5 min) |
@@ -28,7 +28,7 @@ All against PostgreSQL 16.15 on a local cluster, Node 22.22, pnpm 10.28, Chromiu
 | `scripts/backup.sh` with encryption | dump → AES-256 → checksum → decrypt → `pg_restore --list` verified; wrong passphrase rejected; refuses a role without `BYPASSRLS` (exit 3) |
 | Mutation checks (see [TESTING.md](TESTING.md)) | 32 deliberate breakages (6 on the original code, 26 on the extras), each caught by a test. Two of them were **not** caught at first (a work budget and a signal fingerprint) and the tests were made discriminating |
 
-Test inventory: 274 unit + 449 integration + 84 end-to-end = **807 automated tests**. Source ≈ 13 400 lines, tests ≈ 10 000 lines (TypeScript, excluding scripts).
+Test inventory: 279 unit + 449 integration + 84 end-to-end = **812 automated tests**. Source ≈ 13 400 lines, tests ≈ 10 000 lines (TypeScript, excluding scripts).
 
 Also run: `pnpm load` (60 000 tasks, 10 and 50 concurrent users, 0 errors; [TESTING.md](TESTING.md#load-test-pnpm-load)), the error-reporting delivery check against a local HTTPS stand-in for the tracker, and by-hand runs of `pnpm org` (export → `--replace` round trip on the E2E data: identical), `pnpm backup:attachments` and `pnpm privacy` against the E2E database with the least-privilege role.
 

@@ -2,8 +2,7 @@ import { getEnv, tierOf } from "@/config/env";
 import { createDb, type Db } from "@/db/client";
 import { enableRlsGuard } from "@/db/rls-guard";
 import { createFileSender, createLogSender, createResendSender, type EmailSender } from "@/integrations/email";
-import { createBlobStore } from "@/integrations/storage/blob";
-import { createFsStore } from "@/integrations/storage/fs";
+import { selectStore } from "@/integrations/storage/select";
 import type { ObjectStore } from "@/integrations/storage";
 import { createGoogleClient, type GoogleClient } from "@/integrations/google-calendar";
 import type { JobContext } from "@/jobs/worker";
@@ -50,12 +49,8 @@ export function getRuntime(): Runtime {
     production: tier === "production" || tier === "staging",
     rateLimit: tier !== "test" && tier !== "e2e",
   });
-  // Production must use private Blob storage; the filesystem store is for local development only.
-  const store = env.BLOB_READ_WRITE_TOKEN
-    ? createBlobStore(env.BLOB_READ_WRITE_TOKEN)
-    : tier === "production" || tier === "staging"
-      ? unavailableStore()
-      : createFsStore(".data/uploads");
+  // Private Vercel Blob when hosted on Vercel, a directory on this server when self-hosted; production refuses uploads when neither is set.
+  const store = selectStore(env, tier);
   const encryptionKeys = [env.APP_ENCRYPTION_KEY, env.APP_ENCRYPTION_KEY_PREVIOUS].filter((k): k is string => !!k);
   const googleCfg = env.GOOGLE_CALENDAR_CLIENT_ID && env.GOOGLE_CALENDAR_CLIENT_SECRET
     ? { clientId: env.GOOGLE_CALENDAR_CLIENT_ID, clientSecret: env.GOOGLE_CALENDAR_CLIENT_SECRET, redirectUri: `${env.APP_URL}/api/calendar/callback` }
@@ -71,9 +66,4 @@ export function getRuntime(): Runtime {
 /** Test seam: install a prebuilt runtime. */
 export function setRuntimeForTests(rt: Runtime | undefined) {
   (globalThis as G)[KEY] = rt;
-}
-
-function unavailableStore(): ObjectStore {
-  const fail = () => { throw new Error("BLOB_READ_WRITE_TOKEN is not configured; attachments are unavailable"); };
-  return { put: fail, get: fail, delete: fail, list: fail };
 }
