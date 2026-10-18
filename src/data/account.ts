@@ -12,7 +12,7 @@ import type { TenantSession } from "./tenant";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-async function setCtx(tx: Tx, ctx: { userId: string; orgId?: string | null; orgSlug?: string; inviteTokenHash?: string }) {
+export async function setCtx(tx: Tx, ctx: { userId: string; orgId?: string | null; orgSlug?: string; inviteTokenHash?: string }) {
   await tx.execute(sql`select
     set_config('app.user_id', ${ctx.userId}, true),
     set_config('app.org_id', ${ctx.orgId ?? ""}, true),
@@ -197,12 +197,12 @@ export async function listMembers(s: TenantSession, opts: { status?: "pending" |
   return rows.map((r) => ({ ...r, roles: assigns.filter((a) => a.membershipId === r.id).map((a) => ({ id: a.id, roleKey: a.roleKey, scopeType: a.scopeType })) }));
 }
 
-async function lockOrgAdmins(tx: Tx, orgId: string) {
+export async function lockOrgAdmins(tx: Tx, orgId: string) {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${"orgadmins:" + orgId}, 0))`);
 }
 
 /** Number of APPROVED members with an organization-scope `orgadmin` assignment, excluding one membership. */
-async function otherOrgAdmins(tx: Tx, orgId: string, excludeMembershipId: string): Promise<number> {
+export async function otherOrgAdmins(tx: Tx, orgId: string, excludeMembershipId: string): Promise<number> {
   const [row] = await tx
     .select({ n: count() })
     .from(roleAssignments)
@@ -251,7 +251,7 @@ export async function setMembershipStatus(s: TenantSession, input: { membershipI
   await s.tx.insert(auditLogs).values({ orgId: s.orgId, actorUserId: s.userId, action: "membership.status_change", targetType: "membership", targetId: m.id, metadata: { from: m.status, to: input.status } });
 }
 
-async function isOrgAdmin(tx: Tx, membershipId: string): Promise<boolean> {
+export async function isOrgAdmin(tx: Tx, membershipId: string): Promise<boolean> {
   const [row] = await tx
     .select({ n: count() })
     .from(roleAssignments)

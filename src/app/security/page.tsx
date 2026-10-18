@@ -3,7 +3,7 @@ import Link from "next/link";
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, authApi } from "@/ui/api";
+import { ApiError, api, authApi } from "@/ui/api";
 import { Btn, ErrorNote, Field, Loading, Notice, TableWrap, useToast } from "@/ui/components";
 import { useQuery } from "@/ui/hooks";
 import { useI18n } from "@/ui/i18n";
@@ -65,6 +65,11 @@ export default function SecurityPage() {
         <ProfileForm key={`${me.data!.name}|${me.data!.timezone}`} initialName={me.data!.name} initialTz={me.data!.timezone} onSaved={me.reload} />
       </section>
 
+      <section className="card" aria-labelledby="h-pw">
+        <h2 id="h-pw">{t("ui.change_password")}</h2>
+        <PasswordForm />
+      </section>
+
       <section className="card" aria-labelledby="h-2fa">
         <h2 id="h-2fa">{t("ui.two_factor")}</h2>
         {msg && <Notice kind={msg.kind}>{msg.text}</Notice>}
@@ -102,6 +107,18 @@ export default function SecurityPage() {
           </table></TableWrap>
         )}
       </section>
+
+      <section className="card" aria-labelledby="h-data">
+        <h2 id="h-data">{t("ui.your_data")}</h2>
+        <p className="muted">{t("ui.your_data_help")}</p>
+        <a className="btn" href="/api/me/export" download>{t("ui.download_data")}</a>
+      </section>
+
+      <section className="card" aria-labelledby="h-erase">
+        <h2 id="h-erase">{t("ui.erase_account")}</h2>
+        <p className="muted">{t("ui.erase_help")}</p>
+        <EraseForm email={me.data?.email ?? ""} />
+      </section>
     </main>
   );
 }
@@ -127,6 +144,71 @@ function ProfileForm({ initialName, initialTz, onSaved }: { initialName: string;
       </div>
       <datalist id="tzlist">{(typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : ["Asia/Bangkok", "UTC"]).map((z) => <option key={z} value={z} />)}</datalist>
       <Btn type="submit" kind="primary">{t("ui.save")}</Btn>
+    </form>
+  );
+}
+
+function PasswordForm() {
+  const { t, err } = useI18n();
+  const toast = useToast();
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+  const [others, setOthers] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "error" | "success"; text: string }>();
+  async function submit(e: React.FormEvent) {
+    e.preventDefault(); setMsg(undefined);
+    if (next !== again) { setMsg({ kind: "error", text: t("ui.password_mismatch") }); return; }
+    setBusy(true);
+    try {
+      await authApi("/change-password", { currentPassword: current, newPassword: next, revokeOtherSessions: others });
+      setCurrent(""); setNext(""); setAgain("");
+      setMsg({ kind: "success", text: t("ui.password_changed_ok") }); toast(t("ui.password_changed_ok"));
+    } catch (e2) {
+      setMsg({ kind: "error", text: e2 instanceof ApiError && (e2.status === 400 || e2.status === 401) && !/PASSWORD_(TOO|LENGTH)/.test(e2.code) ? t("ui.wrong_password") : err(e2) });
+    } finally { setBusy(false); }
+  }
+  return (
+    <form onSubmit={submit}>
+      {msg && <Notice kind={msg.kind}>{msg.text}</Notice>}
+      <Field label={t("ui.current_password")}>{(id) => <input id={id} type="password" autoComplete="current-password" required value={current} onChange={(e) => setCurrent(e.target.value)} />}</Field>
+      <Field label={t("ui.new_password")} hint={t("ui.password_hint")}>{(id, d) => <input id={id} aria-describedby={d} type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={next} onChange={(e) => setNext(e.target.value)} />}</Field>
+      <Field label={t("ui.confirm_new_password")}>{(id) => <input id={id} type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={again} onChange={(e) => setAgain(e.target.value)} />}</Field>
+      <label className="row" style={{ gap: "0.4rem", marginBottom: "0.85rem" }}><input type="checkbox" checked={others} onChange={(e) => setOthers(e.target.checked)} />{t("ui.sign_out_others")}</label>
+      <Btn type="submit" kind="primary" disabled={busy}>{t("ui.change_password")}</Btn>
+    </form>
+  );
+}
+
+function EraseForm({ email }: { email: string }) {
+  const { t, err } = useI18n();
+  const router = useRouter();
+  const [typed, setTyped] = useState("");
+  const [password, setPassword] = useState("");
+  const [abandon, setAbandon] = useState(false);
+  const [needsAbandon, setNeedsAbandon] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string>();
+  async function submit(e: React.FormEvent) {
+    e.preventDefault(); setMsg(undefined);
+    if (!window.confirm(t("ui.erase_confirm_dialog"))) return;
+    setBusy(true);
+    try {
+      await api("/api/me", { method: "DELETE", body: { confirmEmail: typed, ...(password ? { password } : {}), ...(abandon ? { abandonOrganizations: true } : {}) } });
+      router.replace("/login?erased=1");
+    } catch (e2) {
+      if (e2 instanceof ApiError && e2.data?.needsAbandon) setNeedsAbandon(true);
+      setMsg(e2 instanceof ApiError && e2.status === 422 && /password/i.test(e2.message) ? t("ui.wrong_password") : e2 instanceof ApiError && e2.status === 422 && /e-mail/i.test(e2.message) ? t("ui.erase_mismatch") : err(e2));
+    } finally { setBusy(false); }
+  }
+  return (
+    <form onSubmit={submit}>
+      {msg && <Notice kind="error">{msg}</Notice>}
+      <Field label={t("ui.erase_confirm_email", { email })}>{(id) => <input id={id} type="email" autoComplete="off" required value={typed} onChange={(e) => setTyped(e.target.value)} />}</Field>
+      <Field label={t("ui.current_password")} hint={t("ui.erase_password_hint")}>{(id, d) => <input id={id} aria-describedby={d} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />}</Field>
+      {needsAbandon && <label className="row" style={{ gap: "0.4rem", marginBottom: "0.85rem" }}><input type="checkbox" checked={abandon} onChange={(e) => setAbandon(e.target.checked)} />{t("ui.erase_abandon")}</label>}
+      <Btn type="submit" kind="danger" disabled={busy || !typed}>{t("ui.erase_account")}</Btn>
     </form>
   );
 }

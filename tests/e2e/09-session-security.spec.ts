@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { PASSWORD, attemptLogin, linkIn, login, mails, register, state, preferEnglish, waitMail } from "./helpers";
 
@@ -106,6 +107,82 @@ test("resetting a password signs out every other session, and the old password s
   await a.close(); await b.close(); await c3.close();
 });
 
+test("a signed-in user changes their password from the Security page and other devices are signed out", async ({ browser }) => {
+  const a = await browser.newContext(); const b = await browser.newContext();
+  for (const c of [a, b]) await c.addCookies([{ name: "tt_locale", value: "en", url: ORIGIN }]);
+  const pa = await a.newPage(); const pb = await b.newPage();
+  await register(pa, "Quin Change", "quin@e2e.test");
+  await login(pa, "quin@e2e.test");
+  await login(pb, "quin@e2e.test");
+  await pa.goto("/security");
+  const form = pa.getByRole("region", { name: "Change password" });
+
+  await form.getByLabel("Current password").fill("this-is-not-it-123");
+  await form.getByLabel("New password", { exact: true }).fill("quin-new-passphrase-1");
+  await form.getByLabel("Repeat the new password").fill("quin-new-passphrase-1");
+  await form.getByRole("button", { name: "Change password" }).click();
+  await expect(form.getByText("The current password is not correct.")).toBeVisible();
+
+  await form.getByLabel("Current password").fill(PASSWORD);
+  await form.getByLabel("Repeat the new password").fill("something-else-entirely");
+  await form.getByRole("button", { name: "Change password" }).click();
+  await expect(form.getByText("The two new passwords are different.")).toBeVisible();
+
+  await form.getByLabel("Repeat the new password").fill("quin-new-passphrase-1");
+  await form.getByRole("button", { name: "Change password" }).click();
+  await expect(form.getByText("Password changed.").first()).toBeVisible();
+  await expect(form.getByLabel("Current password")).toHaveValue(""); // fields are cleared
+  expect((await pa.request.get("/api/me")).status()).toBe(200); // this device stays signed in
+  expect((await pb.request.get("/api/me")).status()).toBe(401); // the other one does not
+  const old = await pa.request.post("/api/auth/sign-in/email", { data: { email: "quin@e2e.test", password: PASSWORD }, headers: { origin: ORIGIN } });
+  expect(old.status()).toBe(401);
+  const fresh = await pa.request.post("/api/auth/sign-in/email", { data: { email: "quin@e2e.test", password: "quin-new-passphrase-1" }, headers: { origin: ORIGIN } });
+  expect(fresh.status()).toBe(200);
+  await a.close(); await b.close();
+});
+
+test("a user downloads their data and then erases their account from the Security page", async ({ page }) => {
+  await register(page, "Rae Leaving", "rae@e2e.test");
+  await login(page, "rae@e2e.test");
+  await page.goto("/security");
+
+  // the data export is a file download that names the user and holds no credentials
+  const download = page.waitForEvent("download");
+  await page.getByRole("link", { name: "Download my data" }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toMatch(/^my-data-\d{4}-\d{2}-\d{2}\.json$/);
+  const text = readFileSync((await file.path())!, "utf8");
+  const data = JSON.parse(text) as { profile: { email: string }; signIn: { providers: string[] } };
+  expect(data.profile.email).toBe("rae@e2e.test");
+  expect(data.signIn.providers).toEqual(["credential"]);
+  expect(text).not.toMatch(/scrypt|\$argon|password":/i);
+
+  const form = page.getByRole("region", { name: "Erase my account" });
+  const erase = form.getByRole("button", { name: "Erase my account" });
+  await expect(erase).toBeDisabled(); // nothing typed yet
+
+  // a wrong e-mail address and a wrong password are both refused with a clear message, and nothing happens
+  page.on("dialog", (d) => void d.accept());
+  await form.getByLabel(/Type your e-mail address/).fill("someone@else.test");
+  await form.getByLabel("Current password").fill(PASSWORD);
+  await erase.click();
+  await expect(form.getByText("The e-mail address does not match.")).toBeVisible();
+  await form.getByLabel(/Type your e-mail address/).fill("rae@e2e.test");
+  await form.getByLabel("Current password").fill("this-is-not-it-123");
+  await erase.click();
+  await expect(form.getByText("The current password is not correct.")).toBeVisible();
+  expect((await page.request.get("/api/me")).status()).toBe(200);
+
+  // the real thing
+  await form.getByLabel("Current password").fill(PASSWORD);
+  await erase.click();
+  await expect(page).toHaveURL(/\/login\?erased=1/);
+  await expect(page.getByText("Your account was erased.")).toBeVisible();
+  expect((await page.request.get("/api/me")).status()).toBe(401);
+  const again = await page.request.post("/api/auth/sign-in/email", { data: { email: "rae@e2e.test", password: PASSWORD }, headers: { origin: ORIGIN } });
+  expect(again.status()).toBe(401);
+});
+
 test("cross-origin pages cannot read our API: no permissive CORS headers, preflights are not honoured", async ({ page, request }) => {
   await login(page, "admin@e2e.test");
   const withOrigin = await page.request.get("/api/me", { headers: { origin: "https://evil.example" } });
@@ -114,4 +191,13 @@ test("cross-origin pages cannot read our API: no permissive CORS headers, prefli
   const pre = await request.fetch("/api/me", { method: "OPTIONS", headers: { origin: "https://evil.example", "access-control-request-method": "GET" }, failOnStatusCode: false });
   expect(pre.headers()["access-control-allow-origin"]).toBeUndefined();
   expect(pre.status()).toBeLessThan(500);
+});
+
+test("an unknown address shows a friendly not-found page in the chosen language, with a way back", async ({ page }) => {
+  const res = await page.goto("/no-such-page-here");
+  expect(res?.status()).toBe(404);
+  await expect(page.getByRole("heading", { name: "Page not found", level: 1 })).toBeVisible();
+  await expect(page.getByText(/Next\.js|stack|at .*\.js/)).toHaveCount(0);
+  await page.getByRole("link", { name: "Back to start" }).click();
+  await expect(page).not.toHaveURL(/no-such-page-here/);
 });

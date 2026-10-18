@@ -21,7 +21,7 @@ function LoginForm() {
   const [code, setCode] = useState("");
   const [needsCode, setNeedsCode] = useState(false);
   const [useBackup, setUseBackup] = useState(false);
-  const [message, setMessage] = useState<{ kind: "error" | "success" | "warn"; text: string } | undefined>(() => (params.get("verified") ? { kind: "success", text: t("ui.password_changed") } : undefined));
+  const [message, setMessage] = useState<{ kind: "error" | "success" | "warn"; text: string } | undefined>(() => (params.get("verified") ? { kind: "success", text: t("ui.password_changed") } : params.get("erased") ? { kind: "success", text: t("ui.erased_ok") } : undefined));
   const [busy, setBusy] = useState(false);
   const [google, setGoogle] = useState(false);
 

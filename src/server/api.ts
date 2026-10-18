@@ -1,6 +1,7 @@
 import { ZodError, type ZodType } from "zod";
 import { AppError, notFound, unauthenticated, validation } from "@/lib/errors";
-import { logger } from "@/lib/logger";
+import { after } from "next/server";
+import { reportError } from "@/lib/error-report";
 import { withTenant, type TenantSession } from "@/data/tenant";
 import type { Db } from "@/db/client";
 import { consumeRateLimit } from "./rate-limit";
@@ -20,6 +21,8 @@ export interface ApiContext {
   rt: Runtime;
   db: Db;
   user: ApiUser;
+  /** When this browser session was created (used to require a recent sign-in for destructive account actions). */
+  sessionCreatedAt: Date;
   /** Opens a tenant session. The org id is only a *request*; membership is verified server-side. */
   tenant<T>(orgId: string, fn: (s: TenantSession) => Promise<T>): Promise<T>;
 }
@@ -86,12 +89,12 @@ export function requestIdFor(req: Request): string {
   return given && REQUEST_ID.test(given) ? given : crypto.randomUUID();
 }
 
-function errorResponse(e: unknown, requestId?: string): Response {
+function errorResponse(e: unknown, req: Request, requestId?: string): Response {
   if (e instanceof ZodError) {
     return json({ error: { code: "VALIDATION", message: "Invalid input", issues: e.issues.map((i) => ({ path: i.path.join("."), message: i.message })) } }, 422);
   }
   if (e instanceof AppError) return json({ error: { code: e.code, message: e.message, ...(e.data ? { data: e.data } : {}) } }, e.status);
-  logger.error({ requestId, err: e instanceof Error ? e.message : "unknown" }, "unhandled API error");
+  reportError(e, { kind: "api", requestId, method: req.method, path: new URL(req.url).pathname }, (p) => after(() => p));
   return json({ error: { code: "INTERNAL", message: "Internal error" } }, 500);
 }
 
@@ -121,7 +124,7 @@ async function handleInner(req: Request, fn: (c: ApiContext) => Promise<unknown>
     if (opts.limit) await consumeRateLimit(rt.db, `${opts.limit.name}:${u.id}`, opts.limit.windowSeconds, opts.limit.max);
     const user: ApiUser = { id: u.id, email: u.email, emailVerified: u.emailVerified, name: u.name, locale: u.locale ?? "th", timezone: u.timezone ?? "Asia/Bangkok" };
     const ctx: ApiContext = {
-      req, rt, db: rt.db, user,
+      req, rt, db: rt.db, user, sessionCreatedAt: new Date((session.session as { createdAt: Date | string }).createdAt),
       tenant: (orgId, f) => {
         if (!UUID.test(orgId)) throw notFound();
         return withTenant(rt.db, { userId: user.id, orgId }, f);
@@ -131,6 +134,6 @@ async function handleInner(req: Request, fn: (c: ApiContext) => Promise<unknown>
     if (result instanceof Response) return result;
     return json(result ?? { ok: true }, opts.status ?? 200);
   } catch (e) {
-    return errorResponse(e, requestId);
+    return errorResponse(e, req, requestId);
   }
 }

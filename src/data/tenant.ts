@@ -2,6 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { can, type Principal, type ResolvedAssignment, type ResourceScope } from "@/authz/evaluate";
 import { isPermission, type Permission } from "@/authz/permissions";
 import { AppError, forbidden, notFound } from "@/lib/errors";
+import { describeError } from "@/lib/error-report";
 import { logger } from "@/lib/logger";
 import type { Db, Tx } from "@/db/client";
 import { auditLogs, memberships, rolePermissions, roleAssignments } from "@/db/schema";
@@ -139,6 +140,6 @@ async function recordDenial(db: Db, auth: { userId: string; orgId: string }, per
       });
     });
   } catch (e) {
-    logger.error({ err: e instanceof Error ? e.message : "unknown" }, "failed to record authorization denial");
+    logger.error({ err: describeError(e) }, "failed to record authorization denial");
   }
 }

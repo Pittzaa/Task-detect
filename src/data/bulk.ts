@@ -3,6 +3,7 @@ import type { Db, Tx } from "@/db/client";
 import { auditLogs, tasks } from "@/db/schema";
 import type { TaskPriority, TaskStatus } from "@/domain/workflow";
 import { AppError, validation } from "@/lib/errors";
+import { describeError } from "@/lib/error-report";
 import { logger } from "@/lib/logger";
 import { consumeRateLimit } from "@/server/rate-limit";
 import { changeStatus, setPrimaryAssignee, updateTask } from "./tasks";
@@ -47,7 +48,7 @@ export async function bulkUpdate(s: TenantSession, input: { taskIds: string[]; a
       if (e instanceof AppError && ["NOT_FOUND", "FORBIDDEN", "VALIDATION", "CONFLICT"].includes(e.code)) {
         byId.set(taskId, { taskId, ok: false, code: e.code as "NOT_FOUND" | "FORBIDDEN" | "VALIDATION" | "CONFLICT" });
       } else {
-        logger.error({ err: e instanceof Error ? e.message : "unknown" }, "bulk item failed");
+        logger.error({ err: describeError(e) }, "bulk item failed");
         byId.set(taskId, { taskId, ok: false, code: "ERROR" });
       }
     }

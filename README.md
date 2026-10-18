@@ -45,6 +45,7 @@ pnpm dev                                    # http://localhost:3000   (e-mails a
 | `pnpm verify:attachments` | database ↔ object storage consistency |
 | `pnpm backup:restore-test` / `scripts/backup.sh` | restore drill / logical backup |
 | `pnpm rotate:key` | re-encrypt stored secrets after rotating `APP_ENCRYPTION_KEY` |
+| `pnpm privacy export\|erase --email …` | data-subject requests when the person cannot use the Security page (operator) |
 | `pnpm docs:generate` / `pnpm docs:erd` | regenerate derived documentation |
 
 ## Repository layout

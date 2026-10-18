@@ -32,6 +32,8 @@ entries behaves as expected, and a blank *required* variable still fails validat
 | `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET` | optional | Google Calendar one-way sync | Set **both or neither**. A *separate* OAuth client from sign-in so each asks only for the scopes it needs (`calendar.events`). Redirect URI: `${APP_URL}/api/calendar/callback`. |
 | `CRON_SECRET` | production | `/api/cron/tick`, `/api/health/ready` | ≥ 16 random characters. Vercel Cron sends it as `Authorization: Bearer …` automatically when this variable exists. |
 | `BLOB_READ_WRITE_TOKEN` | for attachments | `src/integrations/storage/blob.ts` | Vercel Blob **private** store token. Without it, production refuses uploads (attachments unavailable) instead of silently using an ephemeral disk. |
+| `SENTRY_DSN` | optional | `src/lib/error-report.ts` | An **https** DSN of a Sentry-compatible tracker (`https://<key>@<host>/<project-id>`). When set, unexpected server errors are sent there as a redacted event (error class, database error code, constraint name, first stack frames, path without query string, request id; **no** message parameters, headers or cookies). Rejected in production/staging if not https. Unset = errors only go to the log. |
+| `APP_RELEASE` | optional | `src/lib/error-report.ts` | Release label attached to reported errors; defaults to `VERCEL_GIT_COMMIT_SHA` when Vercel provides it. |
 | `EMAIL_SINK_FILE` | never in production | `src/integrations/email` | Appends outgoing mail to a file for E2E tests. Rejected by validation in production/staging. |
 
 ### Test and tooling variables (never set on a deployment)

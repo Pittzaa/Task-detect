@@ -37,6 +37,13 @@ The `--slug` (the *organization code*) is what people type on **Request access**
 * **Suspend** blocks all access immediately (checked on every request) and keeps their history; **Reactivate** restores it. **Revoke** ends the membership.
 * A member with no role assignment can sign in but sees nothing (“deny by default”).
 
+**When someone leaves or asks to be erased**
+
+* People can erase their own account (Security page). Their name then reads **“Deleted user”** on the tasks, comments and attachments they leave behind, and tasks assigned to them become **unassigned** — check the board for work that needs a new owner.
+* An account that is the **only administrator** of your organization cannot erase itself while other members exist: make someone else an administrator first (Members → *Assign role*).
+* A person who is the only member of an organization can erase themselves only after confirming that the organization is left without members; it then stays in the database until an operator deletes it.
+* You can **Revoke** a membership without the person erasing anything. If someone asks to be erased or to receive their data but cannot sign in, the operator runs `pnpm privacy export --email …` / `pnpm privacy erase --email … --yes` ([RETENTION.md](RETENTION.md#account-erasure)) after verifying who is asking.
+
 ## 4. Day-to-day task rules (what people will ask you)
 
 * Statuses: To do, In progress, In review, Done, Cancelled, Blocked. Only valid moves are offered; leaving **Done/Cancelled** needs the *reopen* permission (managers and administrators). Details: [WORKFLOW.md](WORKFLOW.md).
@@ -66,6 +73,7 @@ Audit log (administrators): who did what and when — sign-ins, role and members
 | After each deploy | Smoke test | `pnpm smoke` |
 | Daily | Backup (and copy it off-platform) | `scripts/backup.sh` — [BACKUP_RESTORE.md](BACKUP_RESTORE.md) |
 | Monthly | Restore drill on a scratch database; review dead jobs; `pnpm audit --prod` | [BACKUP_RESTORE.md](BACKUP_RESTORE.md) §5 |
+| After every restore | Re-run erasures made since the backup | [RETENTION.md](RETENTION.md#account-erasure) |
 | Quarterly or on suspicion | Rotate secrets | [SECURITY.md](SECURITY.md) §2.6, §6 |
 | Continuous | Uptime monitor on `/api/health/ready` | [DEPLOYMENT.md](DEPLOYMENT.md) §9 |
 

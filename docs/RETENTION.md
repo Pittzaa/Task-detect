@@ -19,7 +19,8 @@ without using a retry), and safe to run concurrently or twice.
 | Digest de-duplication log | 35 days | Deleted | — |
 | Expired sessions, verification tokens, OAuth states, rate-limit counters | 1 day after expiry | Deleted | — |
 | Orphaned files (in Blob, no database row) | 24 h grace | Deleted by the weekly sweep | — |
-| Users, organizations, projects, teams, departments, roles | Not purged | Soft-delete/suspension only | See limitations: there is no account-erasure tool. |
+| Users | Until the person erases their account (Security page → *Erase my account*) | The profile row stays as a **placeholder** (name “Deleted user”, address `erased-<id>@erased.invalid`) so the organization's records keep their references; everything personal is removed — see [Account erasure](#account-erasure) | The person, with their password |
+| Organizations, projects, teams, departments, roles | Not purged | Soft-delete/suspension only | An operator (no UI for deleting an organization) |
 
 “Kept for” means *at least*: the daily job removes data on its next run after the period ends. Pending (unprocessed) jobs and outbox events are **never** purged.
 
@@ -76,3 +77,25 @@ only stops further deletion. There is no per-organization override.
 
 `tests/integration/retention.test.ts` (10 tests), `tests/integration/owner-role.test.ts`, `tests/integration/verify-attachments.test.ts`, `tests/unit/schema-version.test.ts`. Mutation checks performed manually: lowering the SQL floor from 90 to 1 fails the floor test; removing the
 “no child rows” guard makes the purge abort for the organization and fails two tests.
+
+## Account erasure
+
+`DELETE /api/me` (Security page → *Erase my account*) implements a data-subject deletion request. It needs the typed e-mail address **and** the password (an account with no password,
+for example Google-only, needs a sign-in from the last 15 minutes). It is one database transaction, rate limited to 6 attempts per hour, and writes an `account.erased` audit entry in every organization the person belonged to.
+
+| Removed | Kept |
+|---|---|
+| Name, e-mail address, image (replaced by “Deleted user”), verification state, two-factor flag | Tasks, comments, attachments and their activity history the person created — they are the **organization's records** (retention rules above still apply to them) |
+| Password, social-login links, sessions on every device, two-factor secret and backup codes, pending OAuth states, e-mail verification tokens | Audit entries about the person's actions (90-day rule; the actor now reads “Deleted user”) |
+| Role assignments, assignee links (tasks assigned to them become unassigned), notifications, notification settings and preferences, digest log, saved views | The membership row, marked `revoked` (foreign keys depend on it) |
+| Google Calendar link: the cleanup job deletes the events we created in their calendar and revokes the token | |
+
+**Refused (nothing changes):** a wrong e-mail/password; a platform administrator; the only administrator of an organization that still has other members (promote someone first). If the person is the only member of an organization the request needs an explicit “leave it without anyone” confirmation, and the organization then stays in the database with no members until an operator deletes it.
+
+**Operators** (the person cannot sign in): `DATABASE_URL=<runtime role> pnpm privacy export --email a@b.c [--out file.json]` and `pnpm privacy erase --email a@b.c [--abandon] --yes`. The same refusals apply (sole administrator, platform administrator); the operator is trusted to have verified the requester's identity. Smoke-tested against the end-to-end database with the least-privilege role.
+
+Not erased automatically: free text the person wrote that names *other* people or themselves inside tasks and comments (it belongs to the organization; an administrator can trash the task); backups (they age out according to your backup retention — erasure is not re-applied to old dumps, so a **restore must re-run the erasure**, see [BACKUP_RESTORE.md](BACKUP_RESTORE.md)).
+
+## Data export (access request)
+
+`GET /api/me/export` (Security page → *Download my data*) returns a JSON file: profile, sign-in history (IP address, device), memberships, and for each organization the tasks created by or assigned to the person that they can still open, their comments, attachment records (names and sizes, not the files), activity and audit entries about their own actions, notifications, settings, saved views and calendar link state. It never contains credentials. Work the person can no longer open (for example after losing access to a project) is **counted, not listed**. At most 5 000 rows per list (`truncated: true` says so); rate limited to 5 per hour.

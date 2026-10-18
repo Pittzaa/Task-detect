@@ -75,3 +75,44 @@ describe("mass assignment on account endpoints", () => {
     expect((await client.route(mePATCH as never, "PATCH", "/api/me", { name: "Renamed", locale: "en", timezone: "Asia/Tokyo" })).status).toBe(200);
   });
 });
+
+describe("changing the password while signed in", () => {
+  it("needs the current password; the old one then stops working; other devices are signed out only when asked", async () => {
+    const { client, email } = await registerAndSignIn(app, "chpw");
+    const other = new Client(app.auth);
+    expect((await other.authCall("POST", "/sign-in/email", { email, password: PASSWORD })).status).toBe(200);
+    const NEW = "a-fresh-long-passphrase-77";
+
+    const wrong = await client.authCall("POST", "/change-password", { currentPassword: "not-the-password-1", newPassword: NEW, revokeOtherSessions: true });
+    expect(wrong.status).toBeGreaterThanOrEqual(400);
+    expect(wrong.status).toBeLessThan(500);
+    expect((await other.authCall("GET", "/get-session")).status).toBe(200); // nothing happened to the other device
+
+    const short = await client.authCall("POST", "/change-password", { currentPassword: PASSWORD, newPassword: "short", revokeOtherSessions: true });
+    expect(short.status).toBeGreaterThanOrEqual(400);
+
+    const keep = await client.authCall("POST", "/change-password", { currentPassword: PASSWORD, newPassword: NEW, revokeOtherSessions: false });
+    expect(keep.status).toBe(200);
+    expect(((await (await other.authCall("GET", "/get-session")).json()) as { user?: unknown } | null)?.user).toBeTruthy(); // not asked to sign others out
+
+    expect((await new Client(app.auth).authCall("POST", "/sign-in/email", { email, password: PASSWORD })).status).toBe(401); // old password is dead
+    const fresh = new Client(app.auth);
+    expect((await fresh.authCall("POST", "/sign-in/email", { email, password: NEW })).status).toBe(200);
+
+    const NEWER = "yet-another-long-passphrase-88";
+    expect((await client.authCall("POST", "/change-password", { currentPassword: NEW, newPassword: NEWER, revokeOtherSessions: true })).status).toBe(200);
+    expect(((await (await other.authCall("GET", "/get-session")).json()) as { user?: unknown } | null)?.user).toBeFalsy(); // signed out
+    expect(((await (await fresh.authCall("GET", "/get-session")).json()) as { user?: unknown } | null)?.user).toBeFalsy();
+    expect(((await (await client.authCall("GET", "/get-session")).json()) as { user?: unknown } | null)?.user).toBeTruthy(); // this device stays
+  });
+
+  it("is limited to a handful of attempts per minute in a real deployment tier (brute-forcing the current password)", async () => {
+    const limited = makeAuthApp(c.app, { rateLimit: true });
+    const { client } = await registerAndSignIn(limited, "chpwrl");
+    const codes: number[] = [];
+    for (let i = 0; i < 8; i++) codes.push((await client.authCall("POST", "/change-password", { currentPassword: "wrong-wrong-wrong-" + i, newPassword: "a-fresh-long-passphrase-77" })).status);
+    expect(codes.slice(0, 5).every((s) => s === 400 || s === 401)).toBe(true);
+    expect(codes.slice(5)).toContain(429);
+    makeAuthApp(c.app); // restore the shared test runtime
+  });
+});

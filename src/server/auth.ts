@@ -7,6 +7,7 @@ import type { Db } from "@/db/client";
 import { authAccounts, authRateLimits, authSessions, authTwoFactor, authVerifications, users } from "@/db/schema";
 import type { EmailSender } from "@/integrations/email";
 import { DEFAULT_LOCALE, isLocale, t, type Locale } from "@/i18n";
+import { describeError } from "@/lib/error-report";
 import { logger } from "@/lib/logger";
 import { auditAuthEvent } from "@/data/account";
 
@@ -101,6 +102,7 @@ export function createAuth(deps: AuthDeps) {
         "/sign-up/email": { window: 3600, max: 10 },
         "/request-password-reset": { window: 3600, max: 5 },
         "/reset-password": { window: 3600, max: 10 },
+        "/change-password": { window: 60, max: 5 },
         "/two-factor/verify-totp": { window: 60, max: 5 },
         "/two-factor/verify-backup-code": { window: 60, max: 5 },
         "/send-verification-email": { window: 3600, max: 5 },
@@ -119,7 +121,7 @@ export function createAuth(deps: AuthDeps) {
             try {
               await auditAuthEvent(db, session.userId, "auth.login");
             } catch (e) {
-              logger.error({ err: e instanceof Error ? e.message : "unknown" }, "failed to audit login");
+              logger.error({ err: describeError(e) }, "failed to audit login");
             }
           },
         },

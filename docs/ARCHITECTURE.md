@@ -85,7 +85,7 @@ Back-off: 30 s doubling to 1 h with jitter; `maxAttempts` then *dead*; a handler
 ## Observability
 
 Structured JSON logs (pino) with key-based redaction; `x-request-id` on API responses; `GET /api/health` (liveness) and `GET /api/health/ready` (database, RLS role, schema version, job health; bearer-protected);
-the cron route logs `job queue needs attention` when jobs are dead/stuck/old; Settings → Job health for administrators. There is no APM/error-tracking provider integrated (see limitations).
+the cron route logs `job queue needs attention` when jobs are dead/stuck/old; Settings → Job health for administrators. Unexpected errors (API routes, failed renders via `instrumentation.ts`) go through one redacting path (`src/lib/error-report.ts`): a log line always, and a Sentry-protocol event when `SENTRY_DSN` is set. Browser-side failures show `app/error.tsx` / `global-error.tsx` with a reference code that matches the server log. There is no APM (see limitations).
 
 ## Time and language
 

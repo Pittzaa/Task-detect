@@ -79,7 +79,7 @@ Never restore over production first. Restore into a **new** database, verify, th
 
 ### Partial recovery (one organization or one task)
 
-There is no per-tenant export/import tool. Restore the whole database to a scratch database (steps 1–5), then copy the specific rows with SQL as the owner.
+There is no per-tenant export/import tool. **After any restore, re-run erasures** that happened after the backup was taken (`select id from users where deleted_at is not null` in the live database before you restore, then erase those accounts again in the restored one; the restored database will otherwise contain the personal data of people who asked to be erased). Restore the whole database to a scratch database (steps 1–5), then copy the specific rows with SQL as the owner.
 Soft-deleted tasks are restorable in-app by anyone with `task.delete` for **30 days** before the retention job removes them permanently.
 
 ## 4. The restore drill (automated, local)

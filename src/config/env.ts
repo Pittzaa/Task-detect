@@ -27,6 +27,9 @@ const schema = z
     BLOB_READ_WRITE_TOKEN: optional,
     // Development/E2E only: append outgoing emails to this file instead of sending. Forbidden in production.
     EMAIL_SINK_FILE: optional,
+    // Optional error tracking (Sentry-compatible DSN, https only). Unexpected server errors are reported with redacted details.
+    SENTRY_DSN: optional,
+    APP_RELEASE: optional,
   })
   .superRefine((env, ctx) => {
     const tier = env.APP_ENV ?? (env.NODE_ENV === "production" ? "production" : env.NODE_ENV);
@@ -35,6 +38,7 @@ const schema = z
     for (const key of ["BETTER_AUTH_SECRET", "APP_ENCRYPTION_KEY", "RESEND_API_KEY", "EMAIL_FROM", "CRON_SECRET"] as const) {
       if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: "required in production" });
     }
+    if (env.SENTRY_DSN && !env.SENTRY_DSN.startsWith("https://")) ctx.addIssue({ code: "custom", path: ["SENTRY_DSN"], message: "must be an https DSN" });
     if (!env.APP_URL.startsWith("https://")) ctx.addIssue({ code: "custom", path: ["APP_URL"], message: "must be https in production" });
     if (!!env.GOOGLE_CLIENT_ID !== !!env.GOOGLE_CLIENT_SECRET) ctx.addIssue({ code: "custom", path: ["GOOGLE_CLIENT_SECRET"], message: "set both Google sign-in variables or neither" });
     if (!!env.GOOGLE_CALENDAR_CLIENT_ID !== !!env.GOOGLE_CALENDAR_CLIENT_SECRET) ctx.addIssue({ code: "custom", path: ["GOOGLE_CALENDAR_CLIENT_SECRET"], message: "set both Google Calendar variables or neither" });
