@@ -1,7 +1,7 @@
 # คู่มือการ deploy (ภาษาไทย): Vercel + Neon + Resend
 
 คู่มือนี้เป็นลำดับขั้นสำหรับคนที่จะนำระบบขึ้นใช้งานจริงเป็นครั้งแรก ทำตามจากบนลงล่างโดยไม่ข้ามขั้น
-รายละเอียดเชิงลึกและเหตุผลอยู่ในฉบับภาษาอังกฤษ [DEPLOYMENT.md](DEPLOYMENT.md), ตัวแปรทั้งหมดอยู่ใน [ENVIRONMENT.md](ENVIRONMENT.md), เรื่อง backup อยู่ใน [BACKUP_RESTORE.md](BACKUP_RESTORE.md)
+รายละเอียดเชิงลึกและเหตุผลอยู่ในเอกสารอ้างอิง [DEPLOYMENT.md](DEPLOYMENT.md) (ภาษาไทย), ตัวแปรทั้งหมดอยู่ใน [ENVIRONMENT.md](ENVIRONMENT.md), เรื่อง backup อยู่ใน [BACKUP_RESTORE.md](BACKUP_RESTORE.md)
 
 > **อ่านก่อน: อะไรที่ตรวจสอบแล้ว และอะไรที่ยังไม่ได้ตรวจสอบ**
 >
@@ -74,6 +74,31 @@ openssl rand -hex 24       # → CRON_SECRET         (ป้องกัน /api
 3. role เริ่มต้นของโปรเจกต์คือ **owner** ใช้เฉพาะงาน migrate, bootstrap และ backup **ห้ามนำไปใส่ใน Vercel**
 
 > หมายเหตุทางเทคนิค: ระบบเลือกไดรเวอร์ WebSocket ของ Neon เมื่อ host ใน `DATABASE_URL` มี `.neon.tech` ให้ใช้ connection string ที่ Neon ให้มาตรง ๆ อย่าเปลี่ยน host
+
+### 3.1ข ถ้าสร้าง Neon ผ่านปุ่ม Integration ใน Vercel (แทน 3.1)
+
+> **(ตรวจสอบเอง)** หัวข้อนี้เขียนจากภาพหน้าจอตอนติดตั้งและความรู้ทั่วไป ผู้พัฒนาเปิด vercel.com / neon.com เองไม่ได้ ชื่อตัวแปรและหน้าจออาจต่างจากนี้เล็กน้อย
+
+หน้า "เพิ่ม Neon" ใน Vercel ให้ตั้งดังนี้
+
+| รายการ | ตั้งเป็น | เหตุผล |
+|---|---|---|
+| **Region** | ใกล้ region ที่ Vercel รัน function ของคุณ (ปล่อย Washington, D.C. ไว้ได้ถ้าเป็นค่าเริ่มต้นของ Vercel) | ทุกคำขอเรียกฐานข้อมูลหลายครั้ง ระยะห่างระหว่างโค้ดกับฐานข้อมูลสำคัญกว่าระยะห่างถึงผู้ใช้ |
+| **Auth** | **ปิด** | แอปใช้ระบบล็อกอินของตัวเอง (Better Auth) ไม่ได้ใช้ Neon Auth |
+| **Realtime** | ปิด | แอปไม่ใช้ (อัปเดตหน้าจอด้วยการเช็กเป็นระยะ) |
+| **Plan** | Free ได้สำหรับกลุ่มเล็ก (หน้าจอแสดง: 1 GB ต่อโปรเจกต์, 100 CU-ชั่วโมง) | ตรวจเงื่อนไขการพักฐานข้อมูลเมื่อไม่มีคนใช้ในแผนของคุณเอง ครั้งแรกหลังว่างอาจช้า |
+
+แล้วกด **Continue** และเลือกโปรเจกต์ Vercel ที่จะเชื่อม
+
+**หลังติดตั้ง ต้องแก้ environment variables ใน Vercel** (Settings → Environment Variables) เท่าที่ทราบ Integration จะใส่ connection string ของ **owner** ให้เอง
+(เช่น `DATABASE_URL`, `DATABASE_URL_UNPOOLED` และตัวแปรอื่นที่ขึ้นต้นด้วย `POSTGRES_` / `PG` ที่มีรหัสผ่านของ owner) ถ้าปล่อยไว้ แอปจะตอบ 503 ทุกหน้า
+(ตัวป้องกันไม่ยอมใช้ role ที่ข้าม RLS หรือเป็นเจ้าของตาราง) และรหัสผ่านของ owner จะอยู่ใน environment ของแอปโดยไม่จำเป็น
+
+1. ไปที่ Neon (console.neon.tech หรือจากหน้า Integration) คัดลอก connection string แบบ **direct** ของ owner ไปเก็บไว้ **ในเครื่องคุณ** (คือ `OWNER_DIRECT` ในคู่มือนี้)
+2. ทำขั้น 3.2 และ 3.3 (สร้าง role `tt_app`, migrate, grants) ให้เสร็จ
+3. ใน Vercel: แก้ `DATABASE_URL` เป็น **pooled string ของ `tt_app`** (ขั้น 3.2)
+4. ใน Vercel: **ลบ** `DATABASE_URL_UNPOOLED` และตัวแปรทุกตัวที่มีรหัสผ่านของ owner (แอปอ่านแค่ `DATABASE_URL`) ถ้า Vercel ใส่กลับมาเอง ให้ตัดการเชื่อม Integration กับโปรเจกต์ (ฐานข้อมูลใน Neon ยังอยู่) **(ตรวจสอบเอง)**
+5. เช็กว่าไม่เหลือตัวแปรไหนใน Vercel ที่ใช้ชื่อผู้ใช้ owner (มักชื่อ `neondb_owner`) ก่อน deploy
 
 ### 3.2 สร้าง role สำหรับแอป (สำคัญที่สุดเรื่องความปลอดภัย)
 

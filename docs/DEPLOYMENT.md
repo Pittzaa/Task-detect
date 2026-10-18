@@ -1,161 +1,163 @@
-# Deployment (Vercel + Neon + Resend)
+# การ deploy (Vercel + Neon + Resend) — เอกสารอ้างอิง
 
-> คู่มือภาษาไทยแบบทีละขั้น: [DEPLOYMENT_TH.md](DEPLOYMENT_TH.md)
+> คู่มือทีละขั้นสำหรับคนที่ deploy ครั้งแรก: [DEPLOYMENT_TH.md](DEPLOYMENT_TH.md) · ตัวแปรทั้งหมด: [ENVIRONMENT.md](ENVIRONMENT.md)
+> เอกสารนี้เป็นฉบับอ้างอิง (ข้อจำกัดของแผน เหตุผล รายการตรวจ) เลขหัวข้อ §0–§10 คงเดิมเพราะเอกสารอื่นอ้างถึง
 
-> **Read first — what has and has not been verified.**
-> Everything below the *database* line was exercised against a local PostgreSQL 16 and a local production build.
-> **No real Vercel, Neon, Resend, Google or Vercel Blob account was available to the author**, so those integrations
-> were never exercised end-to-end. Where this guide describes a provider's dashboard or plan limit it is written from
-> general knowledge or search snippets and is marked **(verify)**. The sandbox could not read vercel.com or neon.com.
-> The scripts in step 8 exist precisely so that *you* can prove the deployment on the real services in minutes.
+> **อ่านก่อน: อะไรที่ตรวจสอบแล้ว และอะไรที่ยังไม่ได้ตรวจสอบ**
+> ทุกอย่างที่อยู่ใต้ส่วน *ฐานข้อมูล* ผ่านการทดสอบกับ PostgreSQL 16 ในเครื่องและ production build ในเครื่อง
+> **ผู้พัฒนาไม่มีบัญชี Vercel, Neon, Resend, Google หรือ Vercel Blob จริง** จึงไม่เคยทดสอบการเชื่อมต่อเหล่านี้ตั้งแต่ต้นจนจบ
+> ข้อความที่อธิบายหน้าจอหรือข้อจำกัดของแผนของผู้ให้บริการ เขียนจากความรู้ทั่วไปหรือข้อความจากผลค้นหา และมีป้าย **(ตรวจสอบเอง)**
+> เครื่องมือที่ผู้พัฒนาใช้เปิด vercel.com และ neon.com ไม่ได้
+> สคริปต์ในข้อ 8 มีไว้ให้ *คุณ* พิสูจน์การ deploy บนบริการจริงได้ในไม่กี่นาที
 
-## 0. Plans and limits that affect the design (verify each before relying on it)
+## 0. แผนและข้อจำกัดที่กระทบการออกแบบ (ตรวจสอบเองทุกข้อก่อนพึ่งพา)
 
-| Topic | What the app assumes | Why it matters | Fallback |
+| หัวข้อ | สิ่งที่แอปสมมติ | ทำไมสำคัญ | ทางสำรอง |
 |---|---|---|---|
-| **Vercel Cron frequency** | Every minute (`vercel.json`). Reported: *Hobby* plans allow only daily cron, *Pro* allows per-minute **(verify)**. | Reminders, e-mail, Discord, calendar sync and digests are driven by `/api/cron/tick`. | On a plan that cannot run it every minute, either upgrade, or call `GET /api/cron/tick` with `Authorization: Bearer $CRON_SECRET` every 1–5 minutes from any external scheduler. The job queue is durable, so a slow tick only adds latency; it never loses work. If a plan *rejects* the schedule at deploy time, change `vercel.json` accordingly. |
-| **Function request body** | Files up to **4 MB** go through a function (`MAX_UPLOAD_BYTES`; Vercel functions reportedly reject bodies over ~4.5 MB **(verify)**). Larger files, up to **25 MB**, go **straight from the browser to Vercel Blob** (a short-lived token from `/attachments/direct`, then server-side inspection in `/attachments/direct/complete`); this is offered only when `BLOB_READ_WRITE_TOKEN` is set. | The direct path has **never been run against a real Blob store** (see the checklist in §8). | If the checks in §8 fail, set `DIRECT_UPLOADS=off` (files are then limited to 4 MB) or fix the CSP/CORS issue found there. |
-| **Function duration** | The cron route declares `maxDuration = 60` and works in slices of ≤ 45 s; the retention job defers itself when it runs out of time. | A plan with a shorter limit would cut jobs off. | Jobs are leased and retried; lower `maxMs` in `src/jobs/tick.ts` if needed. |
-| **Neon connections** | `DATABASE_URL` is the *pooled* string; interactive transactions go through the WebSocket driver (`@neondatabase/serverless` `Pool`). | Every request opens a transaction and sets tenant context with `set_config(..., true)` (transaction-local). | See *Neon* below. |
-| **Neon backups** | Plan-dependent point-in-time restore window **(verify in the console)**. | See [BACKUP_RESTORE.md](BACKUP_RESTORE.md). | Daily logical dump with `scripts/backup.sh`. |
-| **Resend** | Sending domain verified; free-tier daily limits apply **(verify)**. | Registration, invitations, reset, notifications and digests all use e-mail. | Check Resend limits for your expected volume. |
+| **ความถี่ของ Vercel Cron** | ทุกนาที (`vercel.json`) มีรายงานว่าแผน *Hobby* รันได้แค่วันละครั้ง ส่วน *Pro* รันทุกนาทีได้ **(ตรวจสอบเอง)** | การเตือน อีเมล Discord ซิงก์ปฏิทิน และสรุปประจำวัน ถูกขับด้วย `/api/cron/tick` | ถ้าแผนรันทุกนาทีไม่ได้ ให้อัปเกรด หรือใช้ตัวตั้งเวลาภายนอกเรียก `GET /api/cron/tick` พร้อม `Authorization: Bearer $CRON_SECRET` ทุก 1–5 นาที คิวงานไม่หาย tick ที่ช้าแค่ทำให้ช้าลง ถ้าแผน *ปฏิเสธ* ตารางเวลานี้ตอน deploy ให้แก้ `vercel.json` |
+| **ขนาด body ของ function** | ไฟล์ไม่เกิน **4 MB** ผ่าน function (`MAX_UPLOAD_BYTES` มีรายงานว่า function ของ Vercel ปฏิเสธ body เกิน ~4.5 MB **(ตรวจสอบเอง)**) ไฟล์ใหญ่กว่านั้นถึง **25 MB** ไปจากเบราว์เซอร์เข้า Vercel Blob โดยตรง (ขอโทเค็นอายุสั้นจาก `/attachments/direct` แล้วเซิร์ฟเวอร์ตรวจไฟล์ที่ `/attachments/direct/complete`) เปิดให้ใช้เมื่อตั้ง `BLOB_READ_WRITE_TOKEN` เท่านั้น | เส้นทางตรงนี้ **ยังไม่เคยรันกับ Blob จริง** (ดูรายการตรวจในข้อ 8) | ถ้าการตรวจในข้อ 8 ไม่ผ่าน ให้ตั้ง `DIRECT_UPLOADS=off` (ไฟล์จะจำกัดที่ 4 MB) หรือแก้ปัญหา CSP/CORS ที่พบ |
+| **ระยะเวลาของ function** | route cron ประกาศ `maxDuration = 60` และทำงานเป็นช่วง ≤ 45 วินาที งานล้างข้อมูลเลื่อนตัวเองเมื่อเวลาหมด | แผนที่จำกัดเวลาสั้นกว่านี้จะตัดงานกลางคัน | งานมีสัญญาเช่า (lease) และลองใหม่ได้ ลด `maxMs` ใน `src/jobs/tick.ts` ถ้าจำเป็น |
+| **การเชื่อมต่อ Neon** | `DATABASE_URL` คือ string แบบ *pooled* ธุรกรรมแบบโต้ตอบผ่านไดรเวอร์ WebSocket (`@neondatabase/serverless` `Pool`) | ทุกคำขอเปิดธุรกรรมและตั้งบริบทขององค์กรด้วย `set_config(..., true)` (มีผลเฉพาะธุรกรรมนั้น) | ดูหัวข้อ *Neon* ด้านล่าง |
+| **การสำรองของ Neon** | ช่วงเวลากู้คืนย้อนหลัง (point-in-time) ขึ้นกับแผน **(ดูใน console เอง)** | ดู [BACKUP_RESTORE.md](BACKUP_RESTORE.md) | สำรองแบบ logical รายวันด้วย `scripts/backup.sh` |
+| **Resend** | ยืนยันโดเมนส่งอีเมลแล้ว มีขีดจำกัดรายวันของแผนฟรี **(ตรวจสอบเอง)** | การสมัคร คำเชิญ รีเซ็ตรหัส แจ้งเตือน และสรุปประจำวัน ใช้อีเมลทั้งหมด | ตรวจขีดจำกัดของ Resend เทียบกับปริมาณที่คาดไว้ |
 
-## 1. Prerequisites
+## 1. สิ่งที่ต้องเตรียม
 
-* Node.js ≥ 22 and pnpm 10 on the machine that runs migrations (your laptop or CI).
-* A domain you control (for `APP_URL` and for the Resend sending domain).
-* `psql` available for the one-off role setup, or any SQL console.
+* Node.js ≥ 22 และ pnpm 10 บนเครื่องที่รัน migration (เครื่องของคุณหรือ CI)
+* โดเมนที่คุณควบคุมได้ (ใช้เป็น `APP_URL` และเป็นโดเมนส่งอีเมลของ Resend)
+* `psql` สำหรับตั้ง role ครั้งเดียว หรือ SQL console อะไรก็ได้
 
-## 2. Neon (database)
+## 2. Neon (ฐานข้อมูล)
 
-1. Create a project in the region **closest to your Vercel function region** (latency is paid on every query).
-2. Note two connection strings: the **pooled** one (host contains `-pooler` **(verify)**) and the **direct** one.
-3. The project’s default role is the **owner**. It is used for migrations, bootstrap and backups only.
-4. Create the **runtime role** (never a superuser, never `BYPASSRLS`). In the SQL editor, as the owner:
+1. สร้างโปรเจกต์ใน region **ที่ใกล้ region ของ function บน Vercel ที่สุด** (ทุก query ต้องจ่ายค่า latency)
+2. จด connection string 2 แบบ: แบบ **pooled** (host มีคำว่า `-pooler` **(ตรวจสอบเอง)**) และแบบ **direct**
+3. role เริ่มต้นของโปรเจกต์คือ **owner** ใช้สำหรับ migration, bootstrap และ backup เท่านั้น
+4. สร้าง **role สำหรับแอป** (ห้ามเป็น superuser ห้ามมี `BYPASSRLS`) ใน SQL editor ในฐานะ owner:
 
    ```sql
-   CREATE ROLE tt_app LOGIN PASSWORD '<long random password>' NOSUPERUSER NOBYPASSRLS;
+   CREATE ROLE tt_app LOGIN PASSWORD '<รหัสผ่านสุ่มยาว ๆ>' NOSUPERUSER NOBYPASSRLS;
    ```
 
-   Tenant isolation depends on this: row-level security does not bind roles that bypass it. The application refuses to
-   serve tenant data through such a role in production (`src/db/rls-guard.ts` → HTTP 503), and `pnpm verify:database`
-   checks it explicitly. Build the runtime connection strings from this role’s credentials.
-5. Run migrations as the owner (direct string), then apply the grants:
+   การแยกข้อมูลระหว่างองค์กรอาศัยข้อนี้: row-level security ไม่ผูกมัด role ที่ข้ามมันได้ ใน production แอปปฏิเสธให้บริการข้อมูลองค์กร
+   ผ่าน role แบบนั้น (`src/db/rls-guard.ts` → HTTP 503) รวมถึง role ที่เป็นเจ้าของตาราง และ `pnpm verify:database`
+   ตรวจข้อนี้โดยตรง ให้ประกอบ connection string ของแอปจากข้อมูลของ role นี้
+5. รัน migration ในฐานะ owner (string แบบ direct) แล้วให้สิทธิ์:
 
    ```bash
    DATABASE_URL_UNPOOLED='<owner direct string>' pnpm db:migrate
    psql '<owner direct string>' -v ON_ERROR_STOP=1 -c "$(sed 's/{{APP_ROLE}}/tt_app/g' scripts/grants.sql)"
    ```
 
-   **Re-run the grants after every release that adds tables or functions** (migrations do not grant to the runtime role).
-6. Create the system roles and the first organization (still as the owner; the bootstrap works for an owner without
-   `BYPASSRLS` — covered by `tests/integration/owner-role.test.ts`):
+   **รันส่วนให้สิทธิ์ (grants) ซ้ำทุกครั้งที่ปล่อยเวอร์ชันที่เพิ่มตารางหรือฟังก์ชัน** (migration ไม่ได้ให้สิทธิ์กับ role ของแอป)
+6. สร้าง role ของระบบและองค์กรแรก (ยังคงเป็น owner; bootstrap ทำงานได้กับ owner ที่ไม่มี
+   `BYPASSRLS` — มีเทสต์ใน `tests/integration/owner-role.test.ts`):
 
    ```bash
    DATABASE_URL_UNPOOLED='<owner direct string>' pnpm bootstrap --name "Acme Co" --slug acme --admin-email admin@acme.example --app-url https://tasks.example.com
    ```
 
-   It prints a one-time link (valid 7 days) for the first administrator. The `--slug` is the organization code members type
-   on the “Request access” page.
+   คำสั่งนี้พิมพ์ลิงก์ใช้ครั้งเดียว (อายุ 7 วัน) สำหรับผู้ดูแลคนแรก ส่วน `--slug` คือรหัสองค์กรที่สมาชิกพิมพ์ในหน้า “ขอเข้าร่วม”
 
-**(verify)** Two Neon-specific behaviours were *not* testable locally: that transaction-local `set_config` survives the pooler
-(it should: it lives inside one transaction), and what attributes Neon gives the default owner. `pnpm verify:database`
-(step 8) tests the first against the real service and reports the second.
+**ถ้าสร้าง Neon ผ่านปุ่ม Integration ใน Vercel (Marketplace):** ตอนติดตั้ง ปิด *Auth* และ *Realtime* (แอปไม่ใช้ทั้งสองอย่าง) เท่าที่ทราบ Vercel จะใส่ `DATABASE_URL` และ `DATABASE_URL_UNPOOLED`
+ที่เป็นของ **owner** ให้เองใน environment variables **(ตรวจสอบชื่อตัวแปรเองในหน้า Settings → Environment Variables)** ต้องแก้: ตั้ง `DATABASE_URL` เป็น string ของ `tt_app` และ **ลบ `DATABASE_URL_UNPOOLED` ออกจาก Vercel**
+(เก็บไว้ในเครื่องคุณ) ดูขั้นตอนใน [DEPLOYMENT_TH.md](DEPLOYMENT_TH.md) ขั้น 3.1ข
 
-## 3. Resend (e-mail)
+**(ตรวจสอบเอง)** มี 2 พฤติกรรมของ Neon ที่ทดสอบในเครื่องไม่ได้: `set_config` ที่มีผลเฉพาะธุรกรรมยังทำงานผ่าน pooler (ควรทำงาน เพราะอยู่ในธุรกรรมเดียว)
+และ Neon ให้คุณสมบัติอะไรกับ owner เริ่มต้น `pnpm verify:database` (ข้อ 8) ทดสอบข้อแรกกับบริการจริง และรายงานข้อที่สอง
 
-1. Add and verify your sending domain (DNS records Resend shows you: SPF/DKIM). Wait until it shows *Verified*.
-2. Create an API key with *sending* permission.
-3. Set `RESEND_API_KEY` and `EMAIL_FROM` (an address on the verified domain).
+## 3. Resend (อีเมล)
 
-Delivery is idempotent (each message carries an idempotency key derived from the notification), failures are retried by the job queue, and bounces are not processed (see limitations).
+1. เพิ่มและยืนยันโดเมนส่งอีเมล (DNS record ที่ Resend ให้: SPF/DKIM) รอจนสถานะเป็น *Verified*
+2. สร้าง API key ที่มีสิทธิ์ *ส่ง*
+3. ตั้ง `RESEND_API_KEY` และ `EMAIL_FROM` (ที่อยู่บนโดเมนที่ยืนยันแล้ว)
 
-## 4. Google (optional)
+การส่งไม่ซ้ำ (ทุกข้อความมี idempotency key ที่ได้จากการแจ้งเตือน) ถ้าล้มเหลวคิวงานลองใหม่ให้ และไม่ได้ประมวลผลอีเมลตีกลับ (ดูข้อจำกัด)
 
-Two separate OAuth clients keep scopes minimal. In Google Cloud Console → *APIs & Services*:
+## 4. Google (ไม่บังคับ)
 
-* **Sign-in client** (`GOOGLE_CLIENT_ID/SECRET`): authorised redirect URI `https://<APP_URL host>/api/auth/callback/google`.
-* **Calendar client** (`GOOGLE_CALENDAR_CLIENT_ID/SECRET`): enable the *Google Calendar API*; scope `https://www.googleapis.com/auth/calendar.events`;
-  redirect URI `https://<APP_URL host>/api/calendar/callback`.
+ใช้ OAuth client แยกกัน 2 ตัวเพื่อให้ขอสิทธิ์น้อยที่สุด ใน Google Cloud Console → *APIs & Services*:
 
-Google may require OAuth consent-screen verification before non-test users can authorise the calendar scope **(verify)**.
-Calendar sync is **one-way** (this app → the user’s calendar): the client has no read function, so edits made in Google never flow back.
+* **client สำหรับล็อกอิน** (`GOOGLE_CLIENT_ID/SECRET`): redirect URI ที่อนุญาต `https://<host ของ APP_URL>/api/auth/callback/google`
+* **client สำหรับปฏิทิน** (`GOOGLE_CALENDAR_CLIENT_ID/SECRET`): เปิด *Google Calendar API*; scope `https://www.googleapis.com/auth/calendar.events`;
+  redirect URI `https://<host ของ APP_URL>/api/calendar/callback`
 
-## 5. Vercel Blob (attachments)
+Google อาจกำหนดให้ยืนยันหน้า OAuth consent ก่อนผู้ใช้ที่ไม่ใช่ผู้ทดสอบจะอนุญาต scope ปฏิทินได้ **(ตรวจสอบเอง)**
+การซิงก์ปฏิทินเป็น **ทางเดียว** (แอปนี้ → ปฏิทินของผู้ใช้): โค้ดไม่มีฟังก์ชันอ่าน ดังนั้นการแก้ใน Google ไม่ไหลกลับมา
 
-Create a **private** Blob store, connect it to the project, and set `BLOB_READ_WRITE_TOKEN`. Objects are stored private, are
-read only through the authenticated route `/api/orgs/:org/attachments/:id`, and are served with
-`Content-Disposition: attachment`, `nosniff` and a sandboxing CSP. The Blob client code is type-checked against the SDK but
-was **never run against a real store**; the filesystem store used by the tests implements the same interface.
+## 5. Vercel Blob (ไฟล์แนบ)
 
-## 6. Vercel (hosting)
+สร้าง Blob store แบบ **private** เชื่อมกับโปรเจกต์ และตั้ง `BLOB_READ_WRITE_TOKEN` ออบเจ็กต์ถูกเก็บแบบ private อ่านได้เฉพาะผ่าน route ที่ยืนยันตัวตนแล้ว
+`/api/orgs/:org/attachments/:id` และส่งพร้อม `Content-Disposition: attachment`, `nosniff` และ CSP แบบ sandbox โค้ดไคลเอนต์ของ Blob ผ่านการตรวจชนิดกับ SDK แล้ว
+แต่ **ไม่เคยรันกับ store จริง** ส่วน store แบบไฟล์ที่ใช้ในเทสต์ใช้อินเทอร์เฟซเดียวกัน
 
-1. Import the repository. Framework preset: Next.js. Install: `pnpm install`. Build: `pnpm build` (default).
-2. Set the environment variables from [ENVIRONMENT.md](ENVIRONMENT.md) for the **Production** environment. Preview deployments must use a *separate* database
-   and their own secrets. A Neon branch **copies the parent's data** (and, as far as is known, its roles): create it from an empty or scrubbed state and give the roles new passwords, or use an empty project. Never let a preview hold a copy of production data.
-3. `vercel.json` registers the cron `GET /api/cron/tick` every minute. Vercel sends `Authorization: Bearer $CRON_SECRET` when `CRON_SECRET` is set.
-4. Add the domain and set `APP_URL` to it **before** the first deploy (it is baked into e-mail links, the CSRF origin check and OAuth redirects).
-5. Deploy. Do not run migrations in the build step: apply them deliberately (step 2.5) *before* promoting a release that needs them.
+## 6. Vercel (โฮสต์)
 
-Order of operations for a release that contains migrations: **migrate → grants → deploy**. Migrations in this repo are additive and
-backward compatible with the previous build, so the old build keeps working during the switch. The readiness endpoint reports a
-build that is ahead of its database (`migrations` check) instead of failing on first use.
+1. Import repository เลือก Framework preset: Next.js, Install: `pnpm install`, Build: `pnpm build` (ค่าเริ่มต้น)
+2. ตั้ง environment variables จาก [ENVIRONMENT.md](ENVIRONMENT.md) สำหรับสภาพแวดล้อม **Production** Preview deployment ต้องใช้ฐานข้อมูล *แยก*
+   และความลับของตัวเอง Neon branch **คัดลอกข้อมูลจากต้นทางมาด้วย** (และเท่าที่ทราบรวมถึง role ของมัน): สร้างจากฐานว่างหรือฐานที่ล้างข้อมูลแล้วและตั้งรหัสผ่าน role ใหม่ หรือใช้ project เปล่า อย่าให้ preview มีสำเนาข้อมูล production เด็ดขาด
+3. `vercel.json` ลงทะเบียน cron `GET /api/cron/tick` ทุกนาที Vercel ส่ง `Authorization: Bearer $CRON_SECRET` เมื่อตั้ง `CRON_SECRET`
+4. เพิ่มโดเมนและตั้ง `APP_URL` เป็นโดเมนนั้น **ก่อน** deploy ครั้งแรก (ค่านี้ถูกฝังในลิงก์อีเมล การตรวจ origin ของ CSRF และ OAuth redirect)
+5. Deploy ห้ามรัน migration ในขั้น build: ให้รันโดยตั้งใจ (ข้อ 2.5) *ก่อน* ปล่อยเวอร์ชันที่ต้องใช้
 
-## 7. Domains, cookies and CSRF
+ลำดับสำหรับเวอร์ชันที่มี migration: **migrate → grants → deploy** migration ใน repo นี้เป็นแบบเพิ่มอย่างเดียวและเข้ากันได้กับ build เดิม
+build เก่าจึงยังทำงานได้ระหว่างสลับ endpoint ตรวจความพร้อมจะรายงาน build ที่ล้ำหน้าฐานข้อมูล (เช็ค `migrations`) แทนที่จะพังตอนใช้ครั้งแรก
 
-* Session cookies are `HttpOnly` and `SameSite=Lax` (observed on a local response) and are marked `Secure` in production (`useSecureCookies` follows the deployment tier; the `Secure` flag itself was not observed over real https). Mutating API calls additionally require an `Origin` header equal to `APP_URL`.
-* The content security policy and other security headers are set by `src/proxy.ts` and `next.config.ts`. Anything that must frame the app or load third-party scripts needs a deliberate change there.
+## 7. โดเมน คุกกี้ และ CSRF
 
-## 8. Prove it on the real services
+* คุกกี้ของ session เป็น `HttpOnly` และ `SameSite=Lax` และตั้ง `Secure` ใน production (`useSecureCookies` ตามระดับของ deployment; ผู้พัฒนาเห็นค่า `__Secure-` + `Secure` ใน production build ในเครื่อง แต่ยังไม่เคยเห็นผ่าน https จริง) การเรียก API ที่แก้ข้อมูลต้องมี header `Origin` ตรงกับ `APP_URL` ด้วย
+* นโยบายความปลอดภัยของเนื้อหา (CSP) และ header ความปลอดภัยอื่นตั้งโดย `src/proxy.ts` และ `next.config.ts` ถ้ามีอะไรที่ต้อง frame แอปหรือโหลดสคริปต์ภายนอก ต้องแก้ที่นั่นอย่างตั้งใจ
 
-Run these **in order** after the first deploy. Each is read-only.
+## 8. พิสูจน์บนบริการจริง
+
+รัน **ตามลำดับ** หลัง deploy ครั้งแรก ทุกคำสั่งอ่านอย่างเดียว
 
 ```bash
-# 1. The database exactly as the application will see it (the runtime role's connection string)
+# 1. ฐานข้อมูลตามที่แอปเห็นจริง (connection string ของ role ที่แอปใช้)
 DATABASE_URL='<runtime pooled string>' pnpm verify:database
 
-# 2. The deployed site (liveness, readiness incl. migrations + RLS, headers, unauthenticated access, cross-origin refusal)
+# 2. เว็บที่ deploy แล้ว (มีชีวิต ความพร้อมรวม migration + RLS, header, การเข้าถึงโดยไม่ล็อกอิน, การปฏิเสธข้าม origin)
 APP_URL=https://tasks.example.com CRON_SECRET='<secret>' pnpm smoke
 
-# 3. Attachments match the database (after the first uploads, and after any restore)
+# 3. ไฟล์แนบตรงกับฐานข้อมูล (หลังอัปโหลดครั้งแรก และหลังการกู้คืนทุกครั้ง)
 DATABASE_URL='<runtime string>' BLOB_READ_WRITE_TOKEN='<token>' pnpm verify:attachments
 ```
 
-Then walk through the manual checks, which no script can do for you:
+จากนั้นลองด้วยมือ ซึ่งไม่มีสคริปต์ทำแทนได้:
 
-* [ ] Register with a real address: the verification e-mail **arrives** (Resend) and the link signs you in.
-* [ ] Sign in as the bootstrap administrator via the invitation link; create a department, team, project and a task.
-* [ ] Upload and download an attachment (Blob): a small one (≤ 4 MB) **and a 10–20 MB one**. The large one is the only test of the direct browser → Blob path: open the browser console while uploading and confirm there is **no Content-Security-Policy error** for `vercel.com/api/blob` (if there is, the host in `src/lib/csp.ts` is wrong — send me the blocked URL), the progress text appears, the file shows up as an attachment with the right size and downloads byte-identical, and the object in the Blob dashboard is **private**.
-* [ ] Assign a task to a second account: the in-app notification and the e-mail arrive (this proves the cron tick runs — check `Settings → Job health` if not).
-* [ ] Add a Discord webhook (Settings), send a test event, confirm the message and that `@everyone` in a title is **not** a mention.
-* [ ] Connect Google Calendar, give a task a due date, confirm exactly **one** event appears; change the date, confirm it moves rather than duplicates.
-* [ ] Enable two-factor, sign out and back in with the code and with a backup code.
-* [ ] If `SENTRY_DSN` is set: provoke one server error (it must be an unexpected 500, not a 4xx), for example by temporarily pointing `DATABASE_URL` at a closed port in a preview deployment, and confirm that **one redacted event** appears in the tracker with the request id from the response header. The delivery code has been run against a local HTTPS stand-in for the tracker (see [TESTING.md](TESTING.md#error-reporting-checked-in-the-real-server)); until this check passes, acceptance by a **real** Sentry/GlitchTip is unverified.
-* [ ] Trigger a backup and a restore into a scratch database following [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
+* [ ] สมัครด้วยอีเมลจริง: อีเมลยืนยัน **มาถึง** (Resend) และลิงก์พาเข้าสู่ระบบได้
+* [ ] เข้าในฐานะผู้ดูแลที่ bootstrap ไว้ผ่านลิงก์เชิญ สร้างแผนก ทีม โปรเจกต์ และงาน
+* [ ] อัปโหลดและดาวน์โหลดไฟล์แนบ (Blob): ไฟล์เล็ก (≤ 4 MB) **และไฟล์ 10–20 MB** ไฟล์ใหญ่คือการทดสอบเดียวของเส้นทางเบราว์เซอร์ → Blob โดยตรง: เปิด console ของเบราว์เซอร์ระหว่างอัปโหลดและยืนยันว่า **ไม่มี error ของ Content-Security-Policy** สำหรับ `vercel.com/api/blob` (ถ้ามี แปลว่า host ใน `src/lib/csp.ts` ผิด — ส่ง URL ที่ถูกบล็อกมาให้ผม) มีข้อความความคืบหน้า ไฟล์ขึ้นเป็นไฟล์แนบด้วยขนาดที่ถูกต้องและดาวน์โหลดแล้วตรงกับต้นฉบับทุกไบต์ และออบเจ็กต์ใน dashboard ของ Blob เป็น **private**
+* [ ] มอบหมายงานให้บัญชีที่สอง: แจ้งเตือนในแอปและอีเมลมาถึง (พิสูจน์ว่า cron tick ทำงาน — ถ้าไม่ ดู `Settings → Job health`)
+* [ ] เพิ่ม Discord webhook (Settings) ส่งเหตุการณ์ทดสอบ ยืนยันว่าข้อความมาถึง และ `@everyone` ในชื่องาน **ไม่** กลายเป็นการ mention
+* [ ] เชื่อม Google Calendar ตั้งวันครบกำหนดให้งาน ยืนยันว่ามีอีเวนต์ **หนึ่ง** รายการ เปลี่ยนวันที่ ยืนยันว่าอีเวนต์ย้ายที่ ไม่ซ้ำ
+* [ ] เปิด 2FA ออกจากระบบแล้วเข้าใหม่ด้วยรหัสและด้วย backup code
+* [ ] ถ้าตั้ง `SENTRY_DSN`: ทำให้เกิด error ฝั่งเซิร์ฟเวอร์หนึ่งครั้ง (ต้องเป็น 500 ที่ไม่คาดคิด ไม่ใช่ 4xx) เช่น ชี้ `DATABASE_URL` ไปพอร์ตที่ปิดชั่วคราวใน preview deployment และยืนยันว่า **มีเหตุการณ์ที่ลบข้อมูลสำคัญแล้ว 1 รายการ** ใน tracker พร้อม request id จาก header ของ response โค้ดส่งเคยรันกับตัวจำลอง HTTPS ในเครื่อง (ดู [TESTING.md](TESTING.md#error-reporting-checked-in-the-real-server)) จนกว่าขั้นนี้ผ่าน การที่ Sentry/GlitchTip **จริง** ยอมรับเหตุการณ์ถือว่ายังไม่ได้ตรวจ
+* [ ] สั่งสำรองและกู้คืนเข้าฐานข้อมูลชั่วคราวตาม [BACKUP_RESTORE.md](BACKUP_RESTORE.md)
 
-## 9. Go-live checklist
+## 9. รายการก่อนเปิดใช้งาน
 
-**Blockers** (do not launch until every box is ticked):
+**ตัวบล็อก** (อย่าเปิดจนกว่าจะติ๊กครบ):
 
-- [ ] `pnpm verify:database` passes against the production runtime role.
-- [ ] `pnpm smoke` passes against the production URL, including readiness (`status: ok`).
-- [ ] The cron tick runs at the cadence you chose and `Job health` shows no dead or stuck jobs.
-- [ ] A **real** backup exists *and a restore from it has been tested on your plan* (the local drill proves the procedure, not your provider’s service).
-- [ ] The Neon point-in-time-restore window and the Vercel cron limits were checked against the plan you are actually paying for.
-- [ ] Resend domain verified; a real e-mail was delivered to an inbox.
-- [ ] `APP_ENCRYPTION_KEY` and `BETTER_AUTH_SECRET` are stored in a password manager separate from the deployment.
-- [ ] Preview deployments cannot reach the production database.
-- [ ] At least two people can administer the organization (last-admin protection prevents locking everyone out, but a second human is the real safeguard).
+- [ ] `pnpm verify:database` ผ่านกับ role ของแอปบน production
+- [ ] `pnpm smoke` ผ่านกับ URL ของ production รวมถึงความพร้อม (`status: ok`)
+- [ ] cron tick ทำงานตามความถี่ที่เลือก และ `Job health` ไม่มีงานที่ตายหรือค้าง
+- [ ] มีการสำรอง **จริง** *และกู้คืนจากมันสำเร็จบนแผนของคุณแล้ว* (การซ้อมในเครื่องพิสูจน์ขั้นตอน ไม่ใช่บริการของผู้ให้บริการคุณ)
+- [ ] ตรวจช่วง point-in-time restore ของ Neon และข้อจำกัด cron ของ Vercel เทียบกับแผนที่คุณจ่ายจริงแล้ว
+- [ ] ยืนยันโดเมน Resend แล้ว และอีเมลจริงมาถึงกล่องจดหมาย
+- [ ] `APP_ENCRYPTION_KEY` และ `BETTER_AUTH_SECRET` เก็บใน password manager แยกจากที่ deploy
+- [ ] Preview deployment เข้าถึงฐานข้อมูล production ไม่ได้
+- [ ] มีอย่างน้อยสองคนที่ดูแลองค์กรได้ (ระบบกันไม่ให้ล็อกผู้ดูแลคนสุดท้ายออก แต่มีคนที่สองจริง ๆ คือหลักประกันที่แท้จริง)
 
-**Strongly recommended:**
+**แนะนำอย่างยิ่ง:**
 
-- [ ] An uptime monitor calls `/api/health/ready` (with the bearer secret) every 1–5 minutes and alerts on non-200.
-- [ ] Log drain / alerting on `"level":50` and `"job queue needs attention"` lines.
-- [ ] `pnpm audit --prod` is clean (it was at release; re-run before launch).
-- [ ] The accepted risks in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) have been read by the person accountable for the service.
+- [ ] ตัวเฝ้าระวังเรียก `/api/health/ready` (พร้อม bearer secret) ทุก 1–5 นาทีและแจ้งเตือนเมื่อไม่ใช่ 200
+- [ ] ระบบรวบรวม log / แจ้งเตือนสำหรับบรรทัดที่มี `"level":50` และ `"job queue needs attention"`
+- [ ] `pnpm audit --prod` สะอาด (ตอนปล่อยเวอร์ชันสะอาด รันซ้ำก่อนเปิดใช้)
+- [ ] ผู้รับผิดชอบบริการอ่านความเสี่ยงที่ยอมรับไว้ใน [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) แล้ว
+- [ ] เข้าใจว่า `BETTER_AUTH_SECRET` เปลี่ยนทีหลังไม่ได้โดยไม่ทำให้ 2FA ของทุกคนใช้ไม่ได้ (กู้ด้วย `pnpm auth:reset-2fa` ดู [ENVIRONMENT.md](ENVIRONMENT.md))
 
-## 10. Rollback
+## 10. ย้อนกลับ
 
-* **Application:** promote the previous deployment in Vercel (instant). Migrations are additive, so the previous build still works against the migrated database.
-* **Database:** migrations are forward-only. To undo a bad migration write a new forward migration; for a disaster restore from backup ([BACKUP_RESTORE.md](BACKUP_RESTORE.md)).
-* **Bad key rotation:** put the old key back in `APP_ENCRYPTION_KEY_PREVIOUS`; nothing is overwritten unless it decrypts.
+* **แอป:** promote deployment ก่อนหน้าใน Vercel (ทันที) migration เป็นแบบเพิ่มอย่างเดียว build เดิมจึงยังทำงานกับฐานข้อมูลที่ migrate แล้ว
+* **ฐานข้อมูล:** migration ไปข้างหน้าอย่างเดียว ถ้าต้องยกเลิก migration ที่เสีย ให้เขียน migration ใหม่ไปข้างหน้า ถ้าเกิดหายนะให้กู้จากสำรอง ([BACKUP_RESTORE.md](BACKUP_RESTORE.md))
+* **หมุนกุญแจผิดพลาด:** ใส่กุญแจเดิมกลับใน `APP_ENCRYPTION_KEY_PREVIOUS` ระบบไม่เขียนทับอะไรเลยถ้าถอดรหัสไม่ได้
