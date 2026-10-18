@@ -79,8 +79,9 @@ Never restore over production first. Restore into a **new** database, verify, th
 
 ### Partial recovery (one organization or one task)
 
-There is no per-tenant export/import tool. **After any restore, re-run erasures** that happened after the backup was taken (`select id from users where deleted_at is not null` in the live database before you restore, then erase those accounts again in the restored one; the restored database will otherwise contain the personal data of people who asked to be erased). Restore the whole database to a scratch database (steps 1–5), then copy the specific rows with SQL as the owner.
-Soft-deleted tasks are restorable in-app by anyone with `task.delete` for **30 days** before the retention job removes them permanently.
+* **One task or a few:** soft-deleted tasks are restorable in-app by anyone with `task.delete` for **30 days** before the retention job removes them permanently.
+* **One organization:** use the per-organization tool in [§6](#6-one-organization-export-import-and-partial-restore) — restore the full backup into a **scratch** database (steps 1–5), export the organization there, then import it into the live database.
+* **After any restore, re-run erasures** that happened after the backup was taken (people who asked to be erased are otherwise back with their personal data): list them in the live database *before* restoring (`select id, email from users where deleted_at is not null`) and erase those accounts again in the restored one with `pnpm privacy erase`. See [RETENTION.md](RETENTION.md#account-erasure).
 
 ## 4. The restore drill (automated, local)
 
@@ -127,6 +128,36 @@ RESTORE DRILL PASSED: 20/20 checks
 2. Restore it into a new, empty Neon database (steps 1–5 above).
 3. Record: backup size, restore duration, the result of `pnpm verify:database`, and any difference. Paste the numbers into this file under *Result recorded for this release*.
 4. Only then tick the “restore tested” box in [DEPLOYMENT.md](DEPLOYMENT.md).
+
+## 6. One organization: export, import and partial restore
+
+`pnpm org export` / `pnpm org import` (`scripts/org-transfer.ts`, `src/ops/org-transfer.ts`) move ONE organization between databases of the same application version.
+
+```bash
+# needs an OPERATOR role (superuser or BYPASSRLS — the same role pg_dump needs; the runtime role is refused)
+export DATABASE_URL_UNPOOLED='postgres://backup_operator:…@…/db'
+export ORG_EXPORT_PASSPHRASE='a long passphrase'          # optional but recommended: the file holds ALL of the organization's data
+pnpm org export --org acme --out acme.org.gz              # organization code or UUID
+pnpm org import --file acme.org.gz                        # DRY RUN: what would be created / replaced, row counts
+pnpm org import --file acme.org.gz --apply                # into a database where the organization does not exist
+pnpm org import --file acme.org.gz --apply --replace      # overwrite the existing organization with the bundle
+```
+
+**Partial restore of one organization after a mistake:** (1) restore last night's backup into a scratch database (steps 1–5 above); (2) `pnpm org export` from the scratch database; (3) `pnpm org import --replace` (dry run first, then `--apply`) into the live database. Everything of that organization that is **newer than the backup is lost**, and every other organization is untouched.
+
+What the tool guarantees (all covered by `tests/integration/org-transfer.test.ts`, 18 tests, including four deliberate breakages that the tests caught):
+
+* The bundle contains only rows of that organization, found by looking at the live schema (every table with an `org_id`), in foreign-key order; a new table is picked up automatically. Another tenant's rows, and users who only belong to other tenants, never appear.
+* Import is **one transaction**: either every table is restored and the row counts verified, or nothing changes. The schema must match exactly (migration fingerprint) and the bundle's checksum must be intact.
+* Users are created **without credentials** (no password, sessions or two-factor secret) and without the platform-administrator flag; users that already exist keep theirs. They regain access through the normal “Forgot password” e-mail (tested). An e-mail address that already belongs to a different account stops the import before anything is written.
+* System roles are matched by key, because their ids differ between databases.
+
+What it does **not** do:
+
+* **Files.** Attachment *rows* are restored; the files in the object store are not part of the bundle (see [§2.3](#23-attachments-not-solved-by-this-repository) and `pnpm backup:attachments`).
+* **Transient data:** background jobs, outbox, delivery attempts, digest log and OAuth states are not exported (they would replay old work). After an import give the job queue a few minutes; Google Calendar links come back with their encrypted tokens and are re-synced by the daily reconcile job. Encrypted secrets (Discord webhooks, calendar tokens) only decrypt with the **same `APP_ENCRYPTION_KEY`**.
+* **Streaming.** The bundle is built in memory (gzip on disk). It is fine for tens of thousands of rows; for millions use a database-level restore instead.
+* **Audit log immutability:** `--replace` deletes the organization's audit rows and re-inserts the bundle's (the operator role bypasses the append-only rule, by design, because it can already do anything). Keep operator credentials out of the application.
 
 ## Appendix — example scheduled backup (UNTESTED)
 
