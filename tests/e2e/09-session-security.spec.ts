@@ -30,15 +30,17 @@ test("suspending a member cuts off their existing session on the very next reque
   const members = (await (await admin.request.get(`/api/orgs/${acme()}/members`)).json()) as { members: { id: string; email: string }[] };
   const samId = members.members.find((m) => m.email === "sam@e2e.test")!.id;
   const set = (status: string) => admin.request.post(`/api/orgs/${acme()}/members/${samId}/status`, { data: { status }, headers: { origin: ORIGIN } });
-  expect((await set("suspended")).status()).toBe(200);
-  for (const url of [`/api/orgs/${acme()}/tasks`, `/api/orgs/${acme()}/context`, `/api/orgs/${acme()}/notifications`, `/api/orgs/${acme()}/search?q=Sprint`]) {
-    expect((await sam.request.get(url)).status(), url).toBe(404);
+  try {
+    expect((await set("suspended")).status()).toBe(200);
+    for (const url of [`/api/orgs/${acme()}/tasks`, `/api/orgs/${acme()}/context`, `/api/orgs/${acme()}/notifications`, `/api/orgs/${acme()}/dashboard`, `/api/orgs/${acme()}/projects`]) {
+      expect((await sam.request.get(url)).status(), url).toBe(404);
+    }
+    await sam.goto(`/o/${acme()}/tasks`);
+    await expect(sam.locator('[role="alert"]:not(#__next-route-announcer__)')).toContainText("Not found");
+    expect((await sam.request.get("/api/me")).status()).toBe(200); // the account itself is fine; only the membership is suspended
+  } finally {
+    expect((await set("approved")).status()).toBe(200); // never leave the shared account suspended for the next test
   }
-  await sam.goto(`/o/${acme()}/tasks`);
-  await expect(sam.locator('[role="alert"]:not(#__next-route-announcer__)')).toContainText("Not found");
-  expect((await sam.request.get("/api/me")).status()).toBe(200); // the account itself is fine; only the membership is suspended
-
-  expect((await set("approved")).status()).toBe(200);
   expect((await sam.request.get(`/api/orgs/${acme()}/tasks`)).status()).toBe(200);
   await adminCtx.close(); await samCtx.close();
 });

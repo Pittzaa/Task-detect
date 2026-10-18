@@ -129,7 +129,7 @@ function DrawerBody({ task, reload, onClose, onOpen }: { task: Detail; reload: (
       )}
 
       {/* custom fields */}
-      {(fields.data?.fields.length ?? 0) > 0 && <CustomFields defs={fields.data!.fields} values={task.customFields} editable={p.update} onSave={(values) => void act(() => api(`/api/orgs/${orgId}/tasks/${task.id}/custom-fields`, { method: "PUT", body: { values } }), t("ui.save"))} />}
+      {(fields.data?.fields.length ?? 0) > 0 && <CustomFields defs={fields.data!.fields} values={task.customFields} editable={p.update} onSave={async (values) => (await act(() => api(`/api/orgs/${orgId}/tasks/${task.id}/custom-fields`, { method: "PUT", body: { values } }), t("ui.save"))) !== undefined} />}
 
       {/* subtasks */}
       <section className="card" aria-labelledby="h-sub">
@@ -249,7 +249,8 @@ function AssigneeEditor({ task, people, canAssignOthers, onSave }: { task: Detai
   );
 }
 
-function CustomFields({ defs, values, editable, onSave }: { defs: FieldDef[]; values: Record<string, unknown>; editable: boolean; onSave: (v: Record<string, unknown>) => void }) {
+/** `onSave` resolves to whether the save succeeded: a refused value stays in the form so the person can correct it instead of losing it. */
+function CustomFields({ defs, values, editable, onSave }: { defs: FieldDef[]; values: Record<string, unknown>; editable: boolean; onSave: (v: Record<string, unknown>) => Promise<boolean> }) {
   const { t } = useI18n();
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const val = (d: FieldDef) => (d.id in draft ? draft[d.id] : values[d.id] ?? (d.type === "checkbox" ? false : ""));
@@ -267,7 +268,7 @@ function CustomFields({ defs, values, editable, onSave }: { defs: FieldDef[]; va
           }}</Field>
         ))}
       </div>
-      {editable && Object.keys(draft).length > 0 && <Btn small kind="primary" onClick={() => { onSave(draft); setDraft({}); }}>{t("ui.save")}</Btn>}
+      {editable && Object.keys(draft).length > 0 && <Btn small kind="primary" onClick={async () => { if (await onSave(draft)) setDraft({}); }}>{t("ui.save")}</Btn>}
     </section>
   );
 }

@@ -330,6 +330,8 @@ export const en = {
   "ui.confirm_delete_series": "Delete this recurring task? Open future tasks are removed; past and finished ones stay.",
   "ui.series_created": "Recurring task created ({n} task(s) scheduled)",
   "ui.schedule": "Schedule",
+  "ui.confirm_irreversible": "Are you sure? This cannot be undone.",
+  "ui.confirm_revoke": "Revoke this person's access? They will have to be invited again.",
   "ui.series_note": "Part of a recurring series",
   "ui.all_projects": "All projects",
   "ui.assignee_any": "Anyone",

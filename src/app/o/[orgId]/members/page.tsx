@@ -16,9 +16,9 @@ export default function MembersPage() {
   const { t, err, date, locale } = useI18n();
   const toast = useToast();
   const [tab, setTab] = useState<"members" | "invites" | "roles">("members");
-  const members = useQuery<{ members: Member[] }>(`members:${orgId}`, () => api(`/api/orgs/${orgId}/members?limit=100`));
+  const members = useQuery<{ members: Member[] }>(`members:${orgId}`, () => api(`/api/orgs/${orgId}/members?limit=100`), { refreshMs: 30_000 });
   const roles = useQuery<{ roles: Role[] }>(can.manageRoles || can.approveMembers ? `roles:${orgId}` : null, () => api(`/api/orgs/${orgId}/roles`));
-  const invites = useQuery<{ invitations: Invite[] }>(tab === "invites" ? `invites:${orgId}` : null, () => api(`/api/orgs/${orgId}/invitations`));
+  const invites = useQuery<{ invitations: Invite[] }>(tab === "invites" ? `invites:${orgId}` : null, () => api(`/api/orgs/${orgId}/invitations`), { refreshMs: 30_000 });
   const [pickRole, setPickRole] = useState<Record<string, string>>({});
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("");
@@ -67,7 +67,7 @@ export default function MembersPage() {
                     <td className="row">
                       {m.status === "approved" && <Btn small onClick={() => void run(() => api(`/api/orgs/${orgId}/members/${m.id}/status`, { method: "POST", body: { status: "suspended" } }))}>{t("ui.status_suspend")}</Btn>}
                       {m.status === "suspended" && <Btn small onClick={() => void run(() => api(`/api/orgs/${orgId}/members/${m.id}/status`, { method: "POST", body: { status: "approved" } }))}>{t("ui.status_reactivate")}</Btn>}
-                      {m.status !== "revoked" && <Btn small kind="danger" onClick={() => void run(() => api(`/api/orgs/${orgId}/members/${m.id}/status`, { method: "POST", body: { status: "revoked" } }))}>{t("ui.status_revoke")}</Btn>}
+                      {m.status !== "revoked" && <Btn small kind="danger" onClick={() => { if (window.confirm(t("ui.confirm_revoke"))) void run(() => api(`/api/orgs/${orgId}/members/${m.id}/status`, { method: "POST", body: { status: "revoked" } })); }}>{t("ui.status_revoke")}</Btn>}
                       {can.manageRoles && m.status === "approved" && <AssignRole orgId={orgId} member={m} roles={roles.data?.roles ?? []} onDone={() => members.reload()} />}
                     </td>
                   </tr>
@@ -158,7 +158,7 @@ function RolesTab({ orgId, roles, canManage, onChanged }: { orgId: string; roles
         <section key={r.id} className="card">
           <h3>{r.isSystem ? r.key : r.name} {r.isSystem && <span className="badge" data-p="low">system</span>}</h3>
           <p className="small muted">{r.permissions.join(", ") || "—"}</p>
-          {!r.isSystem && canManage && <Btn small kind="danger" onClick={async () => { try { await api(`/api/orgs/${orgId}/roles/${r.id}`, { method: "DELETE" }); onChanged(); } catch (e) { toast(err(e), "error"); } }}>{t("ui.delete")}</Btn>}
+          {!r.isSystem && canManage && <Btn small kind="danger" onClick={async () => { if (!window.confirm(t("ui.confirm_irreversible"))) return; try { await api(`/api/orgs/${orgId}/roles/${r.id}`, { method: "DELETE" }); onChanged(); } catch (e) { toast(err(e), "error"); } }}>{t("ui.delete")}</Btn>}
         </section>
       ))}
       <Notice>{t("ui.permissions")}: {PERMISSIONS.length}</Notice>

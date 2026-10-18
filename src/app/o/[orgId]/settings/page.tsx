@@ -129,7 +129,7 @@ function Integrations() {
               <span className="row">
                 <Btn small onClick={async () => { await api(`/api/orgs/${orgId}/integrations/discord/${d.id}`, { method: "PATCH", body: { enabled: !d.enabled } }).catch((e) => toast(err(e), "error")); dests.reload(); }}>{d.enabled ? t("ui.disable") : t("ui.enable")}</Btn>
                 <RotateButton orgId={orgId} id={d.id} onDone={dests.reload} />
-                <Btn small kind="danger" onClick={async () => { await api(`/api/orgs/${orgId}/integrations/discord/${d.id}`, { method: "DELETE" }).catch((e) => toast(err(e), "error")); dests.reload(); }}>{t("ui.delete")}</Btn>
+                <Btn small kind="danger" onClick={async () => { if (!window.confirm(t("ui.confirm_irreversible"))) return; await api(`/api/orgs/${orgId}/integrations/discord/${d.id}`, { method: "DELETE" }).catch((e) => toast(err(e), "error")); dests.reload(); }}>{t("ui.delete")}</Btn>
               </span>
             </div>
           ))}
@@ -204,7 +204,7 @@ function CustomFieldsAdmin() {
       <TableWrap label={t("ui.custom_fields")}><table><tbody>
         {q.data?.fields.map((d) => (
           <tr key={d.id}><td><strong>{d.name}</strong></td><td>{t(`ui.type_${d.type}` as never)}</td><td className="small muted">{d.options.filter((o) => !o.archived).map((o) => o.label).join(", ")}</td>
-            <td><Btn small kind="danger" onClick={async () => { await api(`/api/orgs/${orgId}/custom-fields/${d.id}`, { method: "DELETE" }).catch((e) => toast(err(e), "error")); q.reload(); }}>{t("ui.archive")}</Btn></td></tr>
+            <td><Btn small kind="danger" onClick={async () => { if (!window.confirm(t("ui.confirm_irreversible"))) return; await api(`/api/orgs/${orgId}/custom-fields/${d.id}`, { method: "DELETE" }).catch((e) => toast(err(e), "error")); q.reload(); }}>{t("ui.archive")}</Btn></td></tr>
         ))}
       </tbody></table></TableWrap>
       <form className="card" onSubmit={create}>
