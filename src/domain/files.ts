@@ -9,8 +9,12 @@ export const MAX_DIRECT_UPLOAD_BYTES = 25_000_000;
 
 const KEY_UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 /** The only object name a direct upload may use: bound to one organization and one task, so a token can never write elsewhere. */
-export const directUploadKeyPattern = (orgId: string, taskId: string) => new RegExp(`^orgs/${orgId}/tasks/${taskId}/${KEY_UUID}$`, "i");
-export const isDirectUploadKey = (key: string, orgId: string, taskId: string) => /^[0-9a-f-]{36}$/i.test(orgId) && /^[0-9a-f-]{36}$/i.test(taskId) && directUploadKeyPattern(orgId, taskId).test(key);
+export const directUploadKeyPattern = (orgId: string, taskId: string) => new RegExp(`^orgs/${orgId}/tasks/${taskId}/${KEY_UUID}$`);
+/**
+ * Exactly one spelling is accepted: lower case, as PostgreSQL prints ids. Object names are case-sensitive, so a key spelled with
+ * capitals would name an object that the cleanup sweep (which lists `orgs/<id>/` in lower case) can never find and remove.
+ */
+export const isDirectUploadKey = (key: string, orgId: string, taskId: string) => /^[0-9a-f-]{36}$/.test(orgId) && /^[0-9a-f-]{36}$/.test(taskId) && directUploadKeyPattern(orgId, taskId).test(key);
 
 export interface DetectedFile {
   contentType: string;

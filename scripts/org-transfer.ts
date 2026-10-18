@@ -9,11 +9,12 @@ import { exportOrganization, importOrganization, openBundle, sealBundle } from "
  *   pnpm org import --file acme.org.gz                  # dry run: prints what would happen
  *   pnpm org import --file acme.org.gz --apply          # new organization (or empty target)
  *   pnpm org import --file acme.org.gz --apply --replace   # overwrite the existing organization: everything newer than the bundle is LOST
- * Set ORG_EXPORT_PASSPHRASE (>= 12 characters) to encrypt on export / decrypt on import. See docs/BACKUP_RESTORE.md §7.
+ * Set ORG_EXPORT_PASSPHRASE (>= 12 characters) to encrypt on export / decrypt on import. With it set, a file that is not encrypted is refused
+ * (--allow-unsealed overrides, for a plain file you made yourself). See docs/BACKUP_RESTORE.md §7.
  */
 const { values, positionals } = parseArgs({
   allowPositionals: true,
-  options: { org: { type: "string" }, out: { type: "string" }, file: { type: "string" }, apply: { type: "boolean" }, replace: { type: "boolean" } },
+  options: { org: { type: "string" }, out: { type: "string" }, file: { type: "string" }, apply: { type: "boolean" }, replace: { type: "boolean" }, "allow-unsealed": { type: "boolean" } },
 });
 const [command] = positionals;
 const url = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
@@ -32,7 +33,7 @@ try {
     console.log("Attachment FILES are not in the bundle; back them up with `pnpm backup:attachments` (docs/BACKUP_RESTORE.md).");
   } else if (command === "import") {
     if (!values.file) throw new Error("usage: pnpm org import --file <file> [--apply] [--replace]");
-    const bundle = openBundle(readFileSync(values.file), passphrase);
+    const bundle = openBundle(readFileSync(values.file), passphrase, { allowUnsealed: values["allow-unsealed"] });
     const plan = await importOrganization(client, bundle, { apply: values.apply, replace: values.replace });
     console.log(`${plan.applied ? "IMPORTED" : "DRY RUN (nothing changed; add --apply)"}: "${plan.org.slug}" (${plan.org.id}); organization ${plan.exists ? (plan.applied ? "existed and was REPLACED" : "exists, would be REPLACED") : (plan.applied ? "was created" : "is new here")}`);
     console.log(`users to create: ${plan.usersToCreate} (without credentials: they use "forgot password"), already present: ${plan.usersAlreadyPresent}`);

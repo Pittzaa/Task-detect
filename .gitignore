@@ -13,3 +13,10 @@ coverage
 test-results/
 playwright-report/
 .data/backup/
+
+# backups and exports contain real data: never commit them
+backups/
+*.dump
+*.dump.enc
+*.org.gz
+*.org

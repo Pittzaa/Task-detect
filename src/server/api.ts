@@ -48,7 +48,7 @@ export function hasNul(value: unknown): boolean {
   while (stack.length) {
     const v = stack.pop();
     if (typeof v === "string") { if (v.includes("\u0000")) return true; }
-    else if (Array.isArray(v)) stack.push(...v);
+    else if (Array.isArray(v)) { for (const x of v) stack.push(x); } // not push(...v): a long array would overflow the call stack
     else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) { if (k.includes("\u0000")) return true; stack.push(x); }
   }
   return false;

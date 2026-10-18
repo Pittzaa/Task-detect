@@ -14,6 +14,8 @@ entries behaves as expected, and a blank *required* variable still fails validat
 | `development` / `test` | Local work and unit/integration tests | Lenient defaults, local filesystem store for attachments, log email sender. |
 | `e2e` | Browser tests only (`playwright.config.ts`) | A *production build* served over http with a file email sink and no rate limits on auth. Never set this on a real deployment. |
 
+A production **build** that runs as `development`, `test` or `e2e` refuses to start unless `APP_URL` is `localhost`, `127.0.0.1` or `[::1]` (`src/config/env.ts`): setting `APP_ENV` on a real deployment to get round a check would otherwise switch every production safeguard off without a word.
+
 ## Reference
 
 | Variable | Required | Used by | Notes |
@@ -23,7 +25,7 @@ entries behaves as expected, and a blank *required* variable still fails validat
 | `DATABASE_URL` | **always** | runtime (`src/db/client.ts`) | Neon **pooled** connection string for the **least-privilege runtime role** (`NOSUPERUSER NOBYPASSRLS`). Verify it with `pnpm verify:database`. |
 | `DATABASE_URL_UNPOOLED` | for migrations, bootstrap, backups | `scripts/migrate.ts`, `scripts/bootstrap.ts`, `scripts/org-transfer.ts` (needs `BYPASSRLS`), `scripts/privacy.ts` (use the runtime role), `drizzle.config.ts`, `scripts/backup.sh` | Neon **direct** connection string for the **owner** role. Never give this to the running application. |
 | `LOG_LEVEL` | no (`info`) | `src/lib/logger.ts` | `fatal error warn info debug trace silent`. Secrets are redacted regardless. |
-| `BETTER_AUTH_SECRET` | production | session/cookie signing (`src/server/auth.ts`) | ≥ 32 random characters (`openssl rand -base64 48`). Rotating it signs everyone out. |
+| `BETTER_AUTH_SECRET` | production | session/cookie signing (`src/server/auth.ts`) | ≥ 32 random characters (`openssl rand -base64 48`). Rotating it signs everyone out **and makes every stored two-factor secret and backup code unreadable** (Better Auth encrypts them with this secret): everyone who uses two-factor is then locked out of the second step until an operator runs `pnpm auth:reset-2fa --all --yes` (they sign in with the password and enrol again). Rotate it only on suspicion, never as routine; tested in `tests/integration/secret-rotation.test.ts`. |
 | `APP_ENCRYPTION_KEY` | production | AES-256-GCM encryption of Discord webhook URLs and Google refresh tokens | 32 random bytes, base64: `openssl rand -base64 32`. **Losing it makes stored webhooks/tokens unreadable** (they must be re-entered / re-connected). Back it up in your password manager. |
 | `APP_ENCRYPTION_KEY_PREVIOUS` | during rotation | decryption fallback | See *Key rotation* in [SECURITY.md](SECURITY.md). Remove it after `pnpm rotate:key` reports no failures. |
 | `RESEND_API_KEY` | production | e-mail delivery (`src/integrations/email`) | Resend API key with *sending* access. |

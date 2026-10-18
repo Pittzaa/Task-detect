@@ -17,8 +17,9 @@ const { values, positionals } = parseArgs({
   options: { email: { type: "string" }, out: { type: "string" }, abandon: { type: "boolean" }, yes: { type: "boolean" } },
 });
 const [command] = positionals;
-const url = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
-if (!url) throw new Error("DATABASE_URL_UNPOOLED (or DATABASE_URL) is required — use the application's runtime role");
+// The runtime role, so row-level security applies. DATABASE_URL_UNPOOLED is the owner's connection and must not be used here.
+const url = process.env.DATABASE_URL;
+if (!url) throw new Error("DATABASE_URL is required — use the application's runtime role");
 if ((command !== "export" && command !== "erase") || !values.email) {
   throw new Error("usage: pnpm privacy <export|erase> --email <address> [--out file] [--abandon] [--yes]");
 }

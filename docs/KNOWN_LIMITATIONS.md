@@ -41,6 +41,13 @@ Use `pnpm verify:database`, `pnpm smoke`, `pnpm verify:attachments` and the manu
 * **Time zones:** a user’s zone is set from the browser at registration; there is no automatic travel detection.
 * `GET /api/cron/tick` runs the worker inside one function invocation (≤ 45 s). Very large backlogs drain over several ticks.
 
+## Security trade-offs found in the independent review (see [SECURITY.md](SECURITY.md) §4 item 19)
+
+* Anyone who knows a person's e-mail address can use up that person's sign-in allowance (20 failed attempts per 15 minutes) and hold their password-reset requests (5 per hour). They cannot sign in as them. A correct sign-in is not counted.
+* No storage quota: a member with permission to attach files can fill the Blob store (file-token requests are limited to 20 per minute per user).
+* Rotating `BETTER_AUTH_SECRET` locks everyone out of two-factor until an operator runs `pnpm auth:reset-2fa --all --yes`.
+* The time a password-reset or sign-up request takes can reveal whether an address has an account.
+
 ## Decisions left to the owner
 
 1. Vercel plan: per-minute cron (Pro) vs. an external scheduler ([DEPLOYMENT.md](DEPLOYMENT.md) §0).

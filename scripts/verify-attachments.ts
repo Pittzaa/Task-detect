@@ -12,6 +12,7 @@ import { verifyAttachments } from "../src/ops/verify-attachments";
 const env = getEnv();
 const { db, close } = createDb(env.DATABASE_URL);
 const store = env.BLOB_READ_WRITE_TOKEN ? createBlobStore(env.BLOB_READ_WRITE_TOKEN) : createFsStore(".data/uploads");
+console.error(`store checked: ${env.BLOB_READ_WRITE_TOKEN ? "Vercel Blob (BLOB_READ_WRITE_TOKEN)" : "local folder .data/uploads (BLOB_READ_WRITE_TOKEN is not set; this is NOT the production store)"}`);
 const orgIdx = process.argv.indexOf("--org");
 verifyAttachments(db, store, { hashes: process.argv.includes("--hashes"), orgId: orgIdx > -1 ? process.argv[orgIdx + 1] : undefined })
   .then(async (r) => {

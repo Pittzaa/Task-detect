@@ -21,6 +21,7 @@
     "bootstrap": "tsx scripts/bootstrap.ts",
     "privacy": "tsx scripts/privacy.ts",
     "org": "tsx scripts/org-transfer.ts",
+    "auth:reset-2fa": "tsx scripts/reset-two-factor.ts",
     "test:e2e": "pnpm build && playwright test",
     "test:e2e:browsers": "pnpm build && bash scripts/e2e-browsers.sh",
     "load": "tsx scripts/load-test.ts",

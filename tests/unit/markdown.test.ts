@@ -176,3 +176,25 @@ describe("tree shape", () => {
     expect(inl("a **b** c")).toEqual([{ t: "text", v: "a " }, { t: "strong", c: [{ t: "text", v: "b" }] }, { t: "text", v: " c" }]);
   });
 });
+
+describe("the parser never throws, whatever it is given", () => {
+  it("a URL scheme with nothing after it is plain text (this once crashed every page that showed it)", () => {
+    for (const src of ["http://", "https://", "see http:// for details", "x https:// y", "- http://", "> http://", "**http://**", "http://<", "http:// ", "HTTP://", "[a](http://)", "<http://>"]) {
+      expect(() => parseMarkdown(src), src).not.toThrow();
+      expect(() => html(src), src).not.toThrow();
+    }
+    expect(html("see http:// for details")).toBe("<div><p>see http:// for details</p></div>");
+    expect(html("http://a.example")).toContain('href="http://a.example/"');
+  });
+
+  it("survives 20 000 random strings built from the characters the parser reacts to", () => {
+    const pieces = ["http://", "https://", "h", "t", "p", ":", "/", "<", ">", "[", "]", "(", ")", "*", "_", "~", "`", "#", "-", "1.", " ", "\n", "\n\n", "\t", "a", "ก", "&", "\\", "!", "\"", "'", "www.", ".", "@"];
+    let seed = 12345;
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; };
+    for (let n = 0; n < 20_000; n++) {
+      let src = "";
+      for (let k = 1 + Math.floor(rnd() * 12); k > 0; k--) src += pieces[Math.floor(rnd() * pieces.length)];
+      try { renderToStaticMarkup(createElement("div", null, renderMarkdown(src))); } catch (e) { throw new Error(`threw on ${JSON.stringify(src)}: ${(e as Error).message}`); }
+    }
+  });
+});

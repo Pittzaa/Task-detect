@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import { accountRule, throttleAccount } from "@/server/auth-throttle";
+import { sql } from "drizzle-orm";
+import { accountRule, guardAccount, throttleAccount } from "@/server/auth-throttle";
 import { POST } from "@/app/api/auth/[...all]/route";
 import { Client, PASSWORD, makeAuthApp, registerAndSignIn } from "./auth-helpers";
 import { connect } from "./helpers";
@@ -161,5 +162,45 @@ describe("against Better Auth's real two-factor sign-in", () => {
     expect(((await si.json()) as { twoFactorRedirect?: boolean }).twoFactorRedirect).toBe(true);
     const cookieHeader = [...fresh.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
     expect(accountRule("/api/auth/two-factor/verify-totp", undefined, cookieHeader)).not.toBeNull();
+  });
+});
+
+describe("bodies Better Auth understands but the limit could not read", () => {
+  const ctype = (type: string, body: string, path = "/sign-in/email") => new Request(`${BASE}${path}`, { method: "POST", headers: type ? { "content-type": type } : {}, body });
+  const form = (email: string) => `email=${encodeURIComponent(email)}&password=wrong-password-123`;
+
+  it("a form-encoded sign-in, which Better Auth would process, is refused before it can be used to guess without limit", async () => {
+    makeAuthApp(c.app, { rateLimit: false });
+    const email = fresh();
+    const statuses: number[] = [];
+    for (let i = 0; i < 25; i++) statuses.push((await POST(ctype("application/x-www-form-urlencoded", form(email)))).status);
+    expect(statuses).toEqual(Array(25).fill(415));
+  });
+
+  it("the same for the password-reset request, and for a missing or unusual content type", async () => {
+    makeAuthApp(c.app, { rateLimit: false });
+    const email = fresh();
+    expect((await POST(ctype("application/x-www-form-urlencoded", `email=${encodeURIComponent(email)}`, "/request-password-reset"))).status).toBe(415);
+    for (const type of ["multipart/form-data; boundary=x", "text/plain", ""]) {
+      expect((await POST(ctype(type, JSON.stringify({ email, password: "x" })))).status, type || "(none)").toBe(415);
+    }
+  });
+
+  it("JSON in its usual spellings still reaches Better Auth and is counted", async () => {
+    makeAuthApp(c.app, { rateLimit: false });
+    const email = fresh();
+    for (const type of ["application/json", "application/json; charset=utf-8", "APPLICATION/JSON"]) {
+      const res = await POST(ctype(type, JSON.stringify({ email, password: "wrong-password-123" })));
+      expect(res.status, type).toBe(401);
+    }
+    const counted = await c.app.execute(sql`select count from app_rate_limits where key = ${accountRule("/api/auth/sign-in/email", email, null)!.key}`);
+    expect((counted as unknown as { rows: { count: number }[] }).rows[0]!.count).toBe(3);
+  });
+
+  it("other routes are left alone: nothing is rewritten, refused or counted", async () => {
+    let ran = 0;
+    const res = await guardAccount(ctype("application/x-www-form-urlencoded", "x=1", "/sign-up/email"), c.app, async () => { ran++; return new Response("ok"); });
+    expect(res.status).toBe(200);
+    expect(ran).toBe(1);
   });
 });

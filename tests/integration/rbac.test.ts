@@ -110,6 +110,15 @@ describe("server-side RBAC", () => {
       expect(JSON.stringify(logs)).not.toContain("SECRET-PROJECT-NAME");
     });
 
+    it("cannot fill the audit log: after 30 in ten minutes the same person's further denials are still refused but no longer written", async () => {
+      const count = async () => (await c.admin.select().from(auditLogs).where(and(eq(auditLogs.orgId, O.org.id), eq(auditLogs.actorUserId, u.norole!.id), eq(auditLogs.action, "authz.denied")))).length;
+      for (let i = 0; i < 45; i++) expect(await code(withTenant(c.app, as("norole"), (s) => createProject(s, { name: `flood-${i}` })))).toBe("FORBIDDEN");
+      expect(await count()).toBe(30);
+      // somebody else is not affected by it
+      await code(withTenant(c.app, as("viewer"), (s) => createProject(s, { name: "another person" })));
+      expect((await c.admin.select().from(auditLogs).where(and(eq(auditLogs.orgId, O.org.id), eq(auditLogs.actorUserId, u.viewer!.id), eq(auditLogs.action, "authz.denied")))).length).toBeGreaterThan(0);
+    });
+
     it("a denied write is rolled back", async () => {
       await code(withTenant(c.app, as("viewer"), (s) => createProject(s, { name: "should-not-exist" })));
       const rows = await withTenant(c.app, as("admin"), (s) => listProjects(s));

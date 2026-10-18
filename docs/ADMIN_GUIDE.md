@@ -78,7 +78,7 @@ Audit log (administrators): who did what and when — sign-ins, role and members
 | Daily | Backup (and copy it off-platform) | `scripts/backup.sh` — [BACKUP_RESTORE.md](BACKUP_RESTORE.md) |
 | Monthly | Restore drill on a scratch database; review dead jobs; `pnpm audit --prod` | [BACKUP_RESTORE.md](BACKUP_RESTORE.md) §5 |
 | After every restore | Re-run erasures made since the backup | [RETENTION.md](RETENTION.md#account-erasure) |
-| Quarterly or on suspicion | Rotate secrets | [SECURITY.md](SECURITY.md) §2.6, §6 |
+| On suspicion (not as routine) | Rotate secrets. `APP_ENCRYPTION_KEY`: `pnpm rotate:key`. `BETTER_AUTH_SECRET` also breaks every two-factor enrolment: follow with `pnpm auth:reset-2fa --all --yes` | [SECURITY.md](SECURITY.md) §2.6, §6 · [ENVIRONMENT.md](ENVIRONMENT.md) |
 | Continuous | Uptime monitor on `/api/health/ready` | [DEPLOYMENT.md](DEPLOYMENT.md) §9 |
 
 ## 8. Troubleshooting

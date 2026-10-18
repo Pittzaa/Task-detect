@@ -59,7 +59,7 @@ export async function assertCanAttach(s: TenantSession, taskId: string) {
 
 export async function authorizeDirectUpload(s: TenantSession, taskId: string, pathname: string) {
   const task = await assertCanAttach(s, taskId);
-  if (!isDirectUploadKey(pathname, s.orgId, task.id)) throw validation("Invalid upload path");
+  if (!isDirectUploadKey(pathname, s.orgId.toLowerCase(), task.id)) throw validation("Invalid upload path");
   await consumeRateLimit(s.tx as unknown as Db, `upload-token:${s.userId}`, 60, 20);
   if ((await attachmentCount(s, task.id)) >= MAX_ATTACHMENTS_PER_TASK) throw validation("Too many attachments on this task");
   return { maximumSizeInBytes: MAX_DIRECT_UPLOAD_BYTES };
@@ -87,7 +87,7 @@ async function readCapped(stream: ReadableStream<Uint8Array>, max: number): Prom
 export async function finalizeDirectUpload(s: TenantSession, store: ObjectStore, taskId: string, input: { key: string; name: string }) {
   const { task, scope } = await loadTask(s, taskId, { forUpdate: true });
   if (!can(s.principal, "task.attach", scope)) throw forbidden({ permission: "task.attach" });
-  if (!isDirectUploadKey(input.key, s.orgId, task.id)) throw validation("Invalid upload path");
+  if (!isDirectUploadKey(input.key, s.orgId.toLowerCase(), task.id)) throw validation("Invalid upload path");
 
   const [known] = await s.tx.select({ id: attachments.id, taskId: attachments.taskId, uploadedBy: attachments.uploadedBy, filename: attachments.filename, contentType: attachments.contentType, sizeBytes: attachments.sizeBytes, deletedAt: attachments.deletedAt })
     .from(attachments).where(eq(attachments.storageKey, input.key));

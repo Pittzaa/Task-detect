@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { can, type ResourceScope } from "@/authz/evaluate";
 import { isPermission, type Permission } from "@/authz/permissions";
 import type { Db, Tx } from "@/db/client";
@@ -197,6 +197,18 @@ export async function listMembers(s: TenantSession, opts: { status?: "pending" |
   return rows.map((r) => ({ ...r, roles: assigns.filter((a) => a.membershipId === r.id).map((a) => ({ id: a.id, roleKey: a.roleKey, scopeType: a.scopeType })) }));
 }
 
+/**
+ * Invitations sent by a person, or addressed to them, stop being valid when they lose their place in the organization (suspended,
+ * revoked, erased). Otherwise a suspended administrator's unused invitation, or a suspended member's own, would be a way back in.
+ * A deliberate new invitation, sent after that, still brings a person back.
+ */
+export async function voidInvitationsOf(tx: Tx, orgId: string, who: { userId: string; email: string }) {
+  await tx
+    .update(invitations)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(invitations.orgId, orgId), isNull(invitations.acceptedAt), isNull(invitations.revokedAt), or(eq(invitations.invitedBy, who.userId), eq(invitations.email, who.email.trim().toLowerCase()))));
+}
+
 export async function lockOrgAdmins(tx: Tx, orgId: string) {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${"orgadmins:" + orgId}, 0))`);
 }
@@ -248,6 +260,10 @@ export async function setMembershipStatus(s: TenantSession, input: { membershipI
     throw conflict("A revoked membership must be re-invited");
   }
   await s.tx.update(memberships).set({ status: input.status }).where(eq(memberships.id, m.id));
+  if (input.status !== "approved") {
+    const [person] = await s.tx.select({ email: users.email }).from(users).where(eq(users.id, m.userId));
+    await voidInvitationsOf(s.tx, s.orgId, { userId: m.userId, email: person?.email ?? "" });
+  }
   await s.tx.insert(auditLogs).values({ orgId: s.orgId, actorUserId: s.userId, action: "membership.status_change", targetType: "membership", targetId: m.id, metadata: { from: m.status, to: input.status } });
 }
 

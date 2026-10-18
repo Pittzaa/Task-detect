@@ -22,11 +22,23 @@ export function accountRule(path: string, email: string | undefined, cookieHeade
   return null;
 }
 
+/** The same test Better Auth's body parser uses to decide that a body is JSON. */
+const JSON_TYPE = /^application\/([a-z0-9.+-]*\+)?json/i;
+const EMAIL_PATHS = ["/sign-in/email", "/request-password-reset"];
+
+/** False when the request is one the per-account limits key on the e-mail address of, but not in a form they can read. */
+function readsEmailFromJson(req: Request): boolean {
+  if (req.method !== "POST") return true;
+  const path = new URL(req.url).pathname;
+  if (!EMAIL_PATHS.some((p) => path.endsWith(p))) return true;
+  return JSON_TYPE.test((req.headers.get("content-type") ?? "").trim());
+}
+
 async function ruleFor(req: Request): Promise<Rule | null> {
   if (req.method !== "POST") return null;
   const path = new URL(req.url).pathname;
   let email: string | undefined;
-  if (path.endsWith("/sign-in/email") || path.endsWith("/request-password-reset")) {
+  if (EMAIL_PATHS.some((p) => path.endsWith(p))) {
     const body = (await req.clone().json().catch(() => null)) as { email?: unknown } | null;
     if (typeof body?.email === "string") email = body.email.trim().toLowerCase().slice(0, 320);
   }
@@ -56,6 +68,11 @@ async function consume(rule: Rule, db: Db): Promise<Response | null> {
  * answer is a success: signing in correctly, even many times in a row, never uses up the allowance; only wrong guesses do.
  */
 export async function guardAccount(req: Request, db: Db, run: () => Promise<Response>): Promise<Response> {
+  if (!readsEmailFromJson(req)) {
+    // Better Auth also accepts form-encoded bodies on these two routes; the limits below only read JSON, so a form body would
+    // have been counted nowhere. The application only ever sends JSON.
+    return Response.json({ message: "Send this request as application/json.", code: "UNSUPPORTED_MEDIA_TYPE" }, { status: 415, headers: { "cache-control": "no-store" } });
+  }
   const rule = await ruleFor(req);
   if (!rule) return run();
   const refused = await consume(rule, db);

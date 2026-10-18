@@ -2,15 +2,11 @@
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { safeNext } from "@/lib/safe-next";
 import { api, authApi, ApiError } from "@/ui/api";
 import { AuthLayout } from "@/ui/auth-layout";
 import { Btn, Field, Notice } from "@/ui/components";
 import { useI18n } from "@/ui/i18n";
-
-function safeNext(next: string | null): string {
-  // Only same-site relative paths, to prevent open redirects.
-  return next && next.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : "/";
-}
 
 function LoginForm() {
   const { t, err } = useI18n();

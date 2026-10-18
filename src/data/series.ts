@@ -38,6 +38,13 @@ async function assignable(s: TenantSession, userId: string, scope: Parameters<ty
   return !!principal && can(principal, "task.read", scope);
 }
 
+/** Putting someone else on (or taking them off) the work a series creates is assigning, the same as on a task: it needs task.assign. */
+function needAssignRight(s: TenantSession, scope: Parameters<typeof can>[2], before: string | null, after: string | null) {
+  if (before === after) return;
+  if ([before, after].every((u) => u === null || u === s.userId)) return;
+  if (!can(s.principal, "task.assign", scope)) throw forbidden({ permission: "task.assign" });
+}
+
 export async function createSeries(s: TenantSession, input: SeriesInput, todayOverride?: string) {
   const scope = await projectScope(s, input.projectId);
   if (!scope || !can(s.principal, "task.read", scope)) throw notFound();
@@ -49,6 +56,7 @@ export async function createSeries(s: TenantSession, input: SeriesInput, todayOv
   if (!title || title.length > 300) throw validation("val.title_required");
   if (!isValidTimeZone(input.timezone)) throw validation("Invalid time zone");
   if (input.primaryAssigneeId && !(await assignable(s, input.primaryAssigneeId, scope))) throw validation("Assignee cannot be assigned to this task");
+  needAssignRight(s, scope, null, input.primaryAssigneeId ?? null);
 
   const [row] = await s.tx
     .insert(recurrenceSeries)
@@ -173,6 +181,7 @@ export async function updateSeries(s: TenantSession, seriesId: string, patch: Se
   if (patch.dueOffsetDays !== undefined) next.dueOffsetDays = patch.dueOffsetDays;
   if (patch.primaryAssigneeId !== undefined) {
     if (patch.primaryAssigneeId && !(await assignable(s, patch.primaryAssigneeId, scope))) throw validation("Assignee cannot be assigned to this task");
+    needAssignRight(s, scope, series.primaryAssigneeId, patch.primaryAssigneeId);
     next.primaryAssigneeId = patch.primaryAssigneeId;
   }
   if (patch.rule !== undefined) {

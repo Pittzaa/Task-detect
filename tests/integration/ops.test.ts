@@ -67,6 +67,9 @@ describe("NUL characters are rejected at the boundary (PostgreSQL cannot store t
     let deep: unknown = "\u0000";
     for (let i = 0; i < 50_000; i++) deep = [deep];
     expect(hasNul(deep)).toBe(true); // iterative: no stack overflow on hostile nesting
+    // a long flat array (still under the 1 MB body cap) must not overflow the stack either: this once answered 500
+    expect(hasNul(new Array(300_000).fill(0))).toBe(false);
+    expect(hasNul([...new Array(300_000).fill(0), "x\u0000"])).toBe(true);
   });
   it("leaves ordinary text alone, including unicode, emoji and control characters other than NUL", () => {
     expect(hasNul({ a: "สวัสดี 🌏\n\t\u0001", b: [1, true, null, { c: "x" }] })).toBe(false);

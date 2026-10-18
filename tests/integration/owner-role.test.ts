@@ -115,6 +115,23 @@ describe("a plain (non-superuser, non-BYPASSRLS) database owner", () => {
     } finally { await close(); }
   });
 
+  it("the owner itself is NOT acceptable as the runtime role: it can create organizations and the guard says so", async () => {
+    const owner = new pg.Client({ connectionString: withDb(OWNER, "owner", DB) });
+    await owner.connect();
+    try {
+      // the hazard: the owner-only policies apply to whoever connects as the owner
+      await owner.query("begin");
+      const made = await owner.query(`insert into organizations (name, slug) values ('Made by the runtime', 'made-by-owner')`).then(() => true, () => false);
+      await owner.query("rollback");
+      expect(made).toBe(true);
+    } finally { await owner.end(); }
+
+    const { db, close } = createDb(withDb(OWNER, "owner", DB));
+    try {
+      expect(await checkRlsEnforceable(db)).toMatch(/owns the tables/);
+    } finally { await close(); }
+  });
+
   it("purge_audit_logs works through the runtime role and respects the 90-day floor", async () => {
     const org = (await sup.query(`insert into organizations (name, slug) values ('O', 'o-owner-check') returning id`)).rows[0].id as string;
     await sup.query(

@@ -67,6 +67,14 @@ describe("object names", () => {
     expect(isDirectUploadKey(`orgs/x/tasks/y/${id}`, "x", "y")).toBe(false);
     expect(isDirectUploadKey(`orgs/${o}/tasks/${t}/${id}`, ".*", ".*")).toBe(false);
   });
+
+  it("accepts one spelling only (lower case): object names are case-sensitive and the cleanup sweep lists the lower-case prefix", () => {
+    const o = O.org.id, t = taskA, id = randomUUID();
+    expect(isDirectUploadKey(`orgs/${o.toUpperCase()}/tasks/${t}/${id}`, o, t)).toBe(false);
+    expect(isDirectUploadKey(`orgs/${o}/tasks/${t.toUpperCase()}/${id}`, o, t)).toBe(false);
+    expect(isDirectUploadKey(`orgs/${o}/tasks/${t}/${id.toUpperCase()}`, o, t)).toBe(false);
+    expect(isDirectUploadKey(`orgs/${o.toUpperCase()}/tasks/${t}/${id}`, o.toUpperCase(), t)).toBe(false);
+  });
 });
 
 describe("step 1: permission to receive an upload token", () => {
@@ -185,6 +193,7 @@ describe("the HTTP routes", () => {
     expect((await tokenReq(new Client(app.auth), good)).status).toBe(401);
     expect((await tokenReq(web.client, keyFor(taskB))).status).toBe(422); // a name for another task
     expect((await tokenReq(web.client, `orgs/${X.org.id}/tasks/${taskA}/${randomUUID()}`)).status).toBe(422);
+    expect((await tokenReq(web.client, `orgs/${O.org.id.toUpperCase()}/tasks/${taskA}/${randomUUID()}`)).status).toBe(422); // same org, different spelling
     const other = new Request(`http://localhost:3000${path("/direct")}`, { method: "POST", headers: { "content-type": "application/json", origin: "https://evil.example", cookie: [...web.client.cookies].map(([k, v]) => `${k}=${v}`).join("; ") }, body: JSON.stringify({ type: "blob.generate-client-token", payload: { pathname: good } }) });
     expect((await tokenRoute(other, { params: Promise.resolve(params()) } as never)).status).toBe(403); // CSRF
     // the completion callback type is not accepted here, and neither are extra fields

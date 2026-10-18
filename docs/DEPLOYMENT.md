@@ -92,7 +92,7 @@ was **never run against a real store**; the filesystem store used by the tests i
 
 1. Import the repository. Framework preset: Next.js. Install: `pnpm install`. Build: `pnpm build` (default).
 2. Set the environment variables from [ENVIRONMENT.md](ENVIRONMENT.md) for the **Production** environment. Preview deployments must use a *separate* database
-   (a Neon branch is ideal) and their own secrets.
+   and their own secrets. A Neon branch **copies the parent's data** (and, as far as is known, its roles): create it from an empty or scrubbed state and give the roles new passwords, or use an empty project. Never let a preview hold a copy of production data.
 3. `vercel.json` registers the cron `GET /api/cron/tick` every minute. Vercel sends `Authorization: Bearer $CRON_SECRET` when `CRON_SECRET` is set.
 4. Add the domain and set `APP_URL` to it **before** the first deploy (it is baked into e-mail links, the CSRF origin check and OAuth redirects).
 5. Deploy. Do not run migrations in the build step: apply them deliberately (step 2.5) *before* promoting a release that needs them.

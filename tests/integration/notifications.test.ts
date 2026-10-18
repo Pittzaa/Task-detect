@@ -46,7 +46,7 @@ describe("assignment notifications", () => {
     expect(await notifs("mgr")).toHaveLength(0); // the actor is never notified of their own action
     const mail = email.sent.find((m) => m.to.startsWith("mem1-"))!;
     expect(mail.subject).toContain('assigned you to "Prepare launch"'); // mem1 prefers English
-    expect(mail.text).toContain(`/o/${O.org.id}/tasks/${t.id}`);
+    expect(mail.text).toContain(`/o/${O.org.id}/tasks?task=${t.id}`);
     const thMail = email.sent.find((m) => m.to.startsWith("mem2-"))!; // mem2 defaults to Thai
     expect(thMail.subject).toMatch(/[฀-๿]/);
     expect(thMail.subject).toContain("Prepare launch");

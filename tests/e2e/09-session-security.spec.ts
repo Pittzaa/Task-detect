@@ -9,7 +9,9 @@ const ORIGIN = "http://localhost:3100";
 const acme = () => state().acme.orgId;
 
 test("sign-in never redirects to another site, whatever the `next` parameter says", async ({ page }) => {
-  const hostile = ["//evil.example/x", "https://evil.example/x", "/\\evil.example", "javascript:alert(1)", "/%2f%2fevil.example", "////evil.example", "data:text/html,boo"];
+  const hostile = ["//evil.example/x", "https://evil.example/x", "/\\evil.example", "javascript:alert(1)", "/%2f%2fevil.example", "////evil.example", "data:text/html,boo",
+    // browsers drop tab, line feed and carriage return while parsing, so these read as "//evil.example"
+    "/\t/evil.example/x", "/\n/evil.example/x", "/\r/evil.example/x"];
   for (const next of hostile) {
     await page.context().clearCookies();
     await preferEnglish(page);

@@ -145,7 +145,7 @@ describe("one-way sync: tasks -> calendar", () => {
     const ev = g.eventList()[0]!;
     expect(ev).toMatchObject({ summary: "Quarterly review", start: { date: "2026-07-01" }, end: { date: "2026-07-04" }, transparency: "transparent", id: eventIdFor(conn.id, t.id) });
     expect(JSON.stringify(ev)).not.toContain("CONFIDENTIAL");
-    expect(String(ev.description)).toContain(`/o/${O.org.id}/tasks/${t.id}`);
+    expect(String(ev.description)).toContain(`/o/${O.org.id}/tasks?task=${t.id}`);
     const [link] = await c.admin.select().from(calendarEventLinks).where(eq(calendarEventLinks.connectionId, conn.id));
     expect(link).toMatchObject({ taskId: t.id, googleEventId: eventIdFor(conn.id, t.id), failures: 0 });
     expect((await run("ann", (s) => calendarStatus(s)))).toMatchObject({ linkedEvents: 1, failingEvents: 0 });

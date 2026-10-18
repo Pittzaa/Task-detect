@@ -7,6 +7,7 @@ import { logger } from "@/lib/logger";
 import type { Db, Tx } from "@/db/client";
 import { auditLogs, memberships, rolePermissions, roleAssignments } from "@/db/schema";
 import { assertRlsEnforced } from "@/db/rls-guard";
+import { consumeRateLimit } from "@/server/rate-limit";
 
 export interface TenantSession {
   tx: Tx;
@@ -145,8 +146,17 @@ async function loadMembershipStatus(tx: Tx, userId: string, orgId: string) {
   return m?.status;
 }
 
+/** At most this many denials per person per organization are written to the audit log in a window: a member who keeps asking for what they may not do cannot fill it with noise (audit rows cannot be purged for 90 days). */
+const DENIAL_AUDIT_LIMIT = { windowSeconds: 600, max: 30 };
+
 async function recordDenial(db: Db, auth: { userId: string; orgId: string }, permission: string) {
   try {
+    try {
+      await consumeRateLimit(db, `denied:${auth.userId}:${auth.orgId}`, DENIAL_AUDIT_LIMIT.windowSeconds, DENIAL_AUDIT_LIMIT.max);
+    } catch (e) {
+      if (e instanceof AppError && e.code === "RATE_LIMITED") return;
+      throw e;
+    }
     await db.transaction(async (tx) => {
       await setContext(tx, auth.userId, auth.orgId);
       await tx.insert(auditLogs).values({

@@ -135,7 +135,7 @@ describe("delivery", () => {
     expect(call.body.content).not.toMatch(/<@/);
     expect(call.body.allowed_mentions).toEqual({ parse: [] });
     expect(call.redirect).toBe("error");
-    expect(call.body.content).toContain(`/o/${O.org.id}/tasks/${t.id}`);
+    expect(call.body.content).toContain(`/o/${O.org.id}/tasks?task=${t.id}`);
     expect((await destRow(id)).lastStatus).toBe("sent");
     expect((await c.admin.select().from(deliveryAttempts).where(eq(deliveryAttempts.subjectId, id))).some((a) => a.status === "sent")).toBe(true);
     await run("admin", (s) => deleteDestination(s, id));

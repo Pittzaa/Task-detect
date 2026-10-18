@@ -1,3 +1,4 @@
+import { taskLink } from "@/lib/links";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import type { Tx } from "@/db/client";
 import { calendarConnections, calendarEventLinks, taskAssignees, tasks } from "@/db/schema";
@@ -34,7 +35,7 @@ export async function desiredEvent(tx: Tx, ctx: JobContext, conn: Conn, task: Ta
   if (!(await readersOf(tx, conn.orgId, task, [conn.userId])).has(conn.userId)) return null;
   const profile = (await loadProfiles(tx, [conn.userId])).get(conn.userId);
   const locale = profile?.locale ?? DEFAULT_LOCALE;
-  const url = `${ctx.appUrl}/o/${conn.orgId}/tasks/${task.id}`;
+  const url = taskLink(ctx.appUrl, conn.orgId, task.id);
   const body = buildEventBody({
     title: task.title, startDate: task.startDate, dueDate: task.dueDate, done: task.status === "done", url, appName: t(locale, "app.name"),
     description: `${t(locale, "ui.status")}: ${t(locale, `status.${task.status}` as never)} · ${t(locale, "ui.priority")}: ${t(locale, `priority.${task.priority}` as never)}\n${url}`,

@@ -72,9 +72,11 @@ export async function assertOperator(q: Q): Promise<void> {
 }
 
 async function discover(q: Q): Promise<Plan> {
+  // From the catalog, not information_schema: that view hides tables the role has no privilege on, which would drop them from the
+  // bundle without a word. With the catalog they are found, and reading one the role cannot read fails loudly.
   const withOrg = await q.query<{ table_name: string }>(
-    `select c.table_name from information_schema.columns c join information_schema.tables t on t.table_schema = c.table_schema and t.table_name = c.table_name
-      where c.table_schema = 'public' and c.column_name = 'org_id' and t.table_type = 'BASE TABLE' order by 1`,
+    `select c.relname as table_name from pg_attribute a join pg_class c on c.oid = a.attrelid
+      where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p') and a.attname = 'org_id' and a.attnum > 0 and not a.attisdropped order by 1`,
   );
   const names = withOrg.rows.map((r) => r.table_name).filter((n) => !(TRANSIENT_TABLES as readonly string[]).includes(n));
   const selected = ["organizations", ...names, "role_permissions"];
@@ -309,7 +311,11 @@ export async function importOrganization(q: Q, bundle: OrgBundle, o: { replace?:
 // File format: gzip, optionally sealed with a passphrase (AES-256-GCM, scrypt-derived key)
 // ---------------------------------------------------------------------------------------------
 
-const MAGIC_SEALED = Buffer.from("TTORG1\n");
+/** TTORG1 files used scrypt's defaults (N=2^14); TTORG2 uses N=2^17, r=8, p=1 (the OWASP minimum). Both are still readable. */
+const MAGIC_V1 = Buffer.from("TTORG1\n");
+const MAGIC_V2 = Buffer.from("TTORG2\n");
+const SCRYPT_V2 = { N: 2 ** 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };
+const MAX_BUNDLE_BYTES = 1024 * 1024 * 1024;
 
 export function sealBundle(bundle: OrgBundle, passphrase?: string): Buffer {
   const packed = gzipSync(Buffer.from(JSON.stringify(bundle), "utf8"));
@@ -317,22 +323,40 @@ export function sealBundle(bundle: OrgBundle, passphrase?: string): Buffer {
   if (passphrase.length < 12) throw new Error("the passphrase must be at least 12 characters");
   const salt = randomBytes(16);
   const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", scryptSync(passphrase, salt, 32), iv);
+  const cipher = createCipheriv("aes-256-gcm", scryptSync(passphrase, salt, 32, SCRYPT_V2), iv);
   const body = Buffer.concat([cipher.update(packed), cipher.final()]);
-  return Buffer.concat([MAGIC_SEALED, salt, iv, cipher.getAuthTag(), body]);
+  return Buffer.concat([MAGIC_V2, salt, iv, cipher.getAuthTag(), body]);
 }
 
-export function openBundle(file: Buffer, passphrase?: string): OrgBundle {
+export interface OpenOptions {
+  /** Accept a file that is not encrypted although a passphrase is set. Off by default: an unencrypted file carries no proof of who wrote it. */
+  allowUnsealed?: boolean;
+  /** Largest size the file may unpack to (default 1 GiB), against a compressed file crafted to exhaust memory. */
+  maxBytes?: number;
+}
+
+export function openBundle(file: Buffer, passphrase?: string, opts: OpenOptions = {}): OrgBundle {
   let packed = file;
-  if (file.subarray(0, MAGIC_SEALED.length).equals(MAGIC_SEALED)) {
+  const magic = [MAGIC_V2, MAGIC_V1].find((m) => file.subarray(0, m.length).equals(m));
+  if (magic) {
     if (!passphrase) throw new Error("this file is encrypted: set ORG_EXPORT_PASSPHRASE");
-    const o = MAGIC_SEALED.length;
+    const o = magic.length;
+    if (file.length < o + 44) throw new Error("wrong passphrase, or the file was damaged");
     const salt = file.subarray(o, o + 16);
     const iv = file.subarray(o + 16, o + 28);
     const tag = file.subarray(o + 28, o + 44);
-    const decipher = createDecipheriv("aes-256-gcm", scryptSync(passphrase, salt, 32), iv);
-    decipher.setAuthTag(tag);
-    try { packed = Buffer.concat([decipher.update(file.subarray(o + 44)), decipher.final()]); } catch { throw new Error("wrong passphrase, or the file was damaged"); }
+    try {
+      const decipher = createDecipheriv("aes-256-gcm", scryptSync(passphrase, salt, 32, magic === MAGIC_V2 ? SCRYPT_V2 : undefined), iv);
+      decipher.setAuthTag(tag);
+      packed = Buffer.concat([decipher.update(file.subarray(o + 44)), decipher.final()]);
+    } catch { throw new Error("wrong passphrase, or the file was damaged"); }
+  } else if (passphrase && !opts.allowUnsealed) {
+    // A sealed file proves that someone who knows the passphrase wrote it (the checksum inside only detects accidents). With a passphrase
+    // configured, a plain file is exactly what a forger would hand over.
+    throw new Error("ORG_EXPORT_PASSPHRASE is set but this file is not encrypted, so nothing proves who wrote it. Refusing (pass --allow-unsealed only for a file you made yourself without a passphrase).");
   }
-  return validateBundle(JSON.parse(gunzipSync(packed).toString("utf8")));
+  let text: string;
+  try { text = gunzipSync(packed, { maxOutputLength: opts.maxBytes ?? MAX_BUNDLE_BYTES }).toString("utf8"); }
+  catch (e) { throw new Error(/larger than|maxOutputLength|ERR_BUFFER_TOO_LARGE/i.test(String((e as Error).message) + String((e as { code?: string }).code)) ? "the file unpacks to more than the allowed size; refusing" : "the file is not a valid organization export"); }
+  return validateBundle(JSON.parse(text));
 }

@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { pathToFileURL } from "node:url";
 import pg from "pg";
 
 /** Applies versioned migrations over the DIRECT (non-pooled) connection. */
@@ -12,7 +13,8 @@ export async function runMigrations(connectionString: string) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// pathToFileURL: a path with a space, or a Windows path, is not simply "file://" + path, and the script would otherwise do nothing and exit 0
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const url = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL_UNPOOLED (or DATABASE_URL) is required");
   runMigrations(url).then(

@@ -303,6 +303,21 @@ describe("assignees", () => {
     expect(await code(run("mem", (s) => setAssignees(s, t.id, { primary: null, co: [] })))).toBe("OK");
   });
 
+  it("swapping who is primary and who is a co-assignee counts as assigning other people", async () => {
+    const t = await mk("mgr");
+    await run("mgr", (s) => setAssignees(s, t.id, { primary: u.mem2!.id, co: [u.mem!.id] }));
+    // same two people, roles exchanged: nobody is added or removed, but two other people's roles change
+    expect(await code(run("mem", (s) => setAssignees(s, t.id, { primary: u.mem!.id, co: [u.mem2!.id] })))).toBe("FORBIDDEN");
+    // promoting a co-assignee to primary changes the old primary's role as well
+    expect(await code(run("mem", (s) => setAssignees(s, t.id, { primary: u.mem!.id, co: [] })))).toBe("FORBIDDEN");
+    // clearing the primary while keeping them as co-assignee
+    expect(await code(run("mem", (s) => setAssignees(s, t.id, { primary: null, co: [u.mem2!.id, u.mem!.id] })))).toBe("FORBIDDEN");
+    expect((await run("mgr", (s) => getTask(s, t.id))).primaryAssigneeId).toBe(u.mem2!.id);
+    // a manager may do all of it, and doing nothing at all is still a no-op that needs no extra right
+    expect(await code(run("mgr", (s) => setAssignees(s, t.id, { primary: u.mem!.id, co: [u.mem2!.id] })))).toBe("OK");
+    expect(await code(run("mem", (s) => setAssignees(s, t.id, { primary: u.mem!.id, co: [u.mem2!.id] })))).toBe("OK");
+  });
+
   it("emits assignment events listing who was added and removed", async () => {
     const t = await mk("mgr");
     await run("mgr", (s) => setAssignees(s, t.id, { primary: u.mem!.id, co: [] }));

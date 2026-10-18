@@ -8,7 +8,7 @@ without using a retry), and safe to run concurrently or twice.
 
 | Data | Kept for | Then | Who can remove it earlier |
 |---|---|---|---|
-| **Audit log** | **90 days** (product requirement) | Deleted by the database function `purge_audit_logs()` | **Nobody.** No role, including the application and organization administrators, can edit or delete audit rows. |
+| **Audit log** | **90 days** (product requirement) | Deleted by the database function `purge_audit_logs()` | **Nobody through the application.** No application role, including organization administrators, can edit or delete audit rows. An operator with the owner/superuser database role can (for example `pnpm org import --replace` rewrites an organization's rows). |
 | Tasks (**soft-deleted**), incl. subtasks, comments, mentions, labels, assignees, dependencies, custom-field values, activity history, attachments, notifications about them | **30 days** in the trash | Permanently deleted, files included | Restore: anyone holding `task.delete` for that task (`orgadmin`, `manager`) within 30 days. Permanent delete: only this job. |
 | Removed **attachments** (soft-deleted individually) | 30 days | Row and file deleted | Same as above (an administrator can restore via the database only; there is no UI for attachment restore). |
 | Soft-deleted saved views | 30 days | Deleted | — |

@@ -1,4 +1,5 @@
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { bootstrapOrganization } from "../src/data/bootstrap";
 import { createDb } from "../src/db/client";
@@ -50,6 +51,6 @@ export async function setupE2e(adminBase = process.env.E2E_DB_ADMIN_URL ?? "post
   } finally { await close(); }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   setupE2e().then((r) => console.log("e2e database ready", r.acme.orgId), (e) => { console.error(e); process.exit(1); });
 }

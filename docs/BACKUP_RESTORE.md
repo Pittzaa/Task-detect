@@ -63,6 +63,7 @@ BACKUP_BLOB_READ_WRITE_TOKEN=… pnpm backup:attachments --to blob   # … or a 
 # after restoring the DATABASE: copy missing or damaged files back into the live store
 pnpm backup:attachments --restore --from fs:/mnt/backup/attachments
 # options: --org <uuid>  --dry-run  --verify (download existing copies and check SHA-256: slow on a hosted store)
+# BLOB_READ_WRITE_TOKEN must be exported for the LIVE store; without it the tool uses the local folder .data/uploads, says so, and refuses --restore unless you add --allow-local-store
 ```
 
 Rules the tool follows (tests: `tests/integration/backup-attachments.test.ts`, 6 tests, three deliberate breakages caught):
@@ -83,8 +84,8 @@ Never restore over production first. Restore into a **new** database, verify, th
 5. `DATABASE_URL='<runtime string for the restored db>' pnpm verify:database` — must print `DATABASE CHECK PASSED`.
 6. `pnpm verify:attachments` against the restored database and the live Blob store; investigate every `missing_object` finding.
 7. Point a staging deployment at it, run `pnpm smoke`, sign in, open a few tasks.
-8. Switch production: update `DATABASE_URL` / `DATABASE_URL_UNPOOLED` in Vercel and redeploy. Run `pnpm smoke` again.
-9. Sessions in the dump are still valid for their original expiry; to force everyone to sign in again, rotate `BETTER_AUTH_SECRET`.
+8. Switch production: update **`DATABASE_URL` only** (the *runtime* role of the restored database, pooled) in Vercel and redeploy. Do **not** put `DATABASE_URL_UNPOOLED` or any owner/`BYPASSRLS` connection string on Vercel: the running application must never hold it (keep it on the machine where you run migrations and backups). Run `pnpm smoke` again.
+9. Sessions in the dump are still valid for their original expiry. To force everyone to sign in again, revoke them in the database (`delete from auth_sessions;`) rather than rotating `BETTER_AUTH_SECRET`, which would also break every two-factor enrolment (see ENVIRONMENT.md).
 10. Record what happened (time of backup, time restored, data-loss window) for the post-incident review.
 
 **Point-in-time restore on Neon** (if your plan offers it) follows the provider’s procedure (branch from a timestamp); steps 4–9 still apply to the new branch.
@@ -148,7 +149,7 @@ RESTORE DRILL PASSED: 20/20 checks
 ```bash
 # needs an OPERATOR role (superuser or BYPASSRLS — the same role pg_dump needs; the runtime role is refused)
 export DATABASE_URL_UNPOOLED='postgres://backup_operator:…@…/db'
-export ORG_EXPORT_PASSPHRASE='a long passphrase'          # optional but recommended: the file holds ALL of the organization's data
+export ORG_EXPORT_PASSPHRASE='a long passphrase'          # recommended: the file holds ALL of the organization's data. With it set, a file that is NOT encrypted is refused on import (--allow-unsealed overrides): only an encrypted file proves who wrote it — the checksum inside detects accidents, not forgery
 pnpm org export --org acme --out acme.org.gz              # organization code or UUID
 pnpm org import --file acme.org.gz                        # DRY RUN: what would be created / replaced, row counts
 pnpm org import --file acme.org.gz --apply                # into a database where the organization does not exist

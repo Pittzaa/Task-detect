@@ -37,7 +37,18 @@ const schema = z
   .superRefine((env, ctx) => {
     const tier = env.APP_ENV ?? (env.NODE_ENV === "production" ? "production" : env.NODE_ENV);
     if (env.EMAIL_SINK_FILE && tier !== "e2e" && tier !== "development" && tier !== "test") ctx.addIssue({ code: "custom", path: ["EMAIL_SINK_FILE"], message: "only allowed in development, test and e2e" });
-    if (tier !== "production" && tier !== "staging") return;
+    if (tier !== "production" && tier !== "staging") {
+      // The relaxed tiers turn off the production safeguards (row-level-security check, https, the e-mail sink, rate limits, a built-in
+      // secret). A production BUILD running as one of them is a test rig; if it is reachable at a real address it is a misconfigured
+      // deployment (for example APP_ENV=development set on a preview to get round the APP_URL check), so it must refuse to start.
+      if (env.NODE_ENV === "production") {
+        const host = (() => { try { return new URL(env.APP_URL).hostname; } catch { return ""; } })();
+        if (!["localhost", "127.0.0.1", "[::1]", "::1"].includes(host)) {
+          ctx.addIssue({ code: "custom", path: ["APP_ENV"], message: `a production build running as "${tier}" may only be served at localhost; set APP_ENV to production or staging` });
+        }
+      }
+      return;
+    }
     for (const key of ["BETTER_AUTH_SECRET", "APP_ENCRYPTION_KEY", "RESEND_API_KEY", "EMAIL_FROM", "CRON_SECRET"] as const) {
       if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: "required in production" });
     }

@@ -56,7 +56,7 @@ pnpm install --frozen-lockfile
 รันบนเครื่องของคุณ แล้วเก็บผลทั้งสามไว้ใน password manager **แยกจากที่เก็บ deployment** (อย่าเก็บไว้ที่ Vercel ที่เดียว)
 
 ```bash
-openssl rand -base64 48    # → BETTER_AUTH_SECRET  (เปลี่ยนแล้วทุกคนถูก sign out)
+openssl rand -base64 48    # → BETTER_AUTH_SECRET  (เปลี่ยนแล้วทุกคนถูก sign out **และ 2FA ของทุกคนใช้ไม่ได้** ต้องรัน `pnpm auth:reset-2fa --all --yes` แล้วให้ทุกคนตั้ง 2FA ใหม่ — เปลี่ยนเฉพาะเมื่อสงสัยว่ารั่ว)
 openssl rand -base64 32    # → APP_ENCRYPTION_KEY  (หายแล้ว webhook Discord และโทเค็น Google Calendar ที่เก็บไว้ถอดรหัสไม่ได้)
 openssl rand -hex 24       # → CRON_SECRET         (ป้องกัน /api/cron/tick และ /api/health/ready)
 ```
@@ -202,7 +202,7 @@ curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://tasks.yourcompany.exam
 
 กด Deploy แล้วรอจนสำเร็จ เปิด `https://<โดเมน>/login` ควรเห็นหน้าเข้าสู่ระบบ (ภาษาไทยเป็นค่าเริ่มต้น) ถ้า build หรือรันไม่ขึ้น ดูตารางแก้ปัญหาท้ายคู่มือ
 
-> **Preview deployments:** ต้องใช้ฐานข้อมูลแยก (เช่น Neon branch) และความลับของตัวเอง และเนื่องจาก `APP_URL` ต้องตรงกับ origin ที่ใช้จริง preview ที่ได้ URL แบบสุ่มจึงใช้ทดสอบการเข้าสู่ระบบได้ยาก ถ้าต้องการ staging ให้ทำ project แยกที่มีโดเมนคงที่ และตั้ง `APP_ENV=staging` (กฎเข้มเท่า production) **อย่าให้ preview ชี้ฐานข้อมูล production เด็ดขาด**
+> **Preview deployments:** ต้องใช้ฐานข้อมูลแยกและความลับของตัวเอง (Neon branch จะ **คัดลอกข้อมูลจากต้นทางมาด้วย** — สร้างจากฐานว่างหรือล้างข้อมูลก่อนและเปลี่ยนรหัสผ่านของ role ใหม่ หรือใช้ project เปล่า) และเนื่องจาก `APP_URL` ต้องตรงกับ origin ที่ใช้จริง preview ที่ได้ URL แบบสุ่มจึงใช้ทดสอบการเข้าสู่ระบบได้ยาก ถ้าต้องการ staging ให้ทำ project แยกที่มีโดเมนคงที่ และตั้ง `APP_ENV=staging` (กฎเข้มเท่า production) **อย่าให้ preview ชี้ฐานข้อมูล production เด็ดขาด**
 
 ## ขั้นที่ 8: เข้าใช้ครั้งแรก
 

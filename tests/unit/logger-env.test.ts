@@ -48,6 +48,20 @@ describe("deployment tiers", () => {
   it("only the explicit e2e tier allows a production build over http with an email sink", () => {
     expect(getEnv({ ...base, NODE_ENV: "production", APP_ENV: "e2e", EMAIL_SINK_FILE: "/tmp/x" } as unknown as NodeJS.ProcessEnv).APP_ENV).toBe("e2e");
   });
+  it("a production build running as a relaxed tier refuses to start unless it is served at localhost (APP_ENV cannot quietly switch the safeguards off)", () => {
+    for (const tier of ["development", "test", "e2e"]) {
+      expect(() => getEnv({ ...base, NODE_ENV: "production", APP_ENV: tier, APP_URL: "https://tasks.example.com" } as unknown as NodeJS.ProcessEnv), tier).toThrow(/APP_ENV/);
+      expect(() => getEnv({ ...base, NODE_ENV: "production", APP_ENV: tier, APP_URL: "http://tasks.example.com" } as unknown as NodeJS.ProcessEnv), tier).toThrow(/APP_ENV/);
+    }
+    for (const url of ["http://localhost:3100", "http://127.0.0.1:3000", "http://[::1]:3000"]) {
+      expect(getEnv({ ...base, NODE_ENV: "production", APP_ENV: "e2e", APP_URL: url } as unknown as NodeJS.ProcessEnv).APP_ENV, url).toBe("e2e");
+    }
+    // plain development and test runs (no production build) are not restricted
+    expect(getEnv({ ...base, NODE_ENV: "development", APP_URL: "https://my-tunnel.example.com" } as unknown as NodeJS.ProcessEnv).APP_URL).toBe("https://my-tunnel.example.com");
+    // and the real tiers are unaffected
+    const prod = { ...base, NODE_ENV: "production", APP_URL: "https://app.example", BETTER_AUTH_SECRET: "x".repeat(40), APP_ENCRYPTION_KEY: "k", RESEND_API_KEY: "r", EMAIL_FROM: "a@b.c", CRON_SECRET: "c".repeat(20) };
+    expect(getEnv({ ...prod, APP_ENV: "staging" } as unknown as NodeJS.ProcessEnv).APP_ENV).toBe("staging");
+  });
   it("blank values count as unset: optional ones are ignored, required ones still fail", () => {
     const prod = { ...base, NODE_ENV: "production", APP_URL: "https://app.example", BETTER_AUTH_SECRET: "x".repeat(40), APP_ENCRYPTION_KEY: "k", RESEND_API_KEY: "r", EMAIL_FROM: "a@b.c", CRON_SECRET: "c".repeat(20) };
     const env = getEnv({ ...prod, BLOB_READ_WRITE_TOKEN: "", GOOGLE_CLIENT_ID: "  ", GOOGLE_CLIENT_SECRET: "" } as unknown as NodeJS.ProcessEnv);

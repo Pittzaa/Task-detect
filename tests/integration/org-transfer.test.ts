@@ -356,6 +356,70 @@ describe("a hand-built bundle (checksum recomputed) cannot reach into another or
   });
 });
 
+describe("sealed files", () => {
+  const PASS = "a long enough passphrase";
+
+  it("with a passphrase set, a file that is not encrypted is refused: it proves nothing about who wrote it", async () => {
+    const b = await exportOrganization(src, O.org.slug);
+    const forged = sealBundle(rewrap(b, (x) => { x.tables.tasks![0]!.title = "forged"; }));
+    expect(() => openBundle(forged, PASS)).toThrow(/not encrypted/);
+    expect(openBundle(forged, PASS, { allowUnsealed: true }).tables.tasks![0]!.title).toBe("forged"); // an explicit, visible choice
+    expect(openBundle(forged).tables.tasks![0]!.title).toBe("forged"); // no passphrase configured: nothing to compare with
+  });
+
+  it("a cut-off sealed file gives the same plain message as a wrong passphrase, whatever length it was cut to", async () => {
+    const sealed = sealBundle(await exportOrganization(src, O.org.slug), PASS);
+    for (const n of [0, 3, 7, 20, 40, 50, 60, sealed.length - 1]) {
+      const cut = sealed.subarray(0, n);
+      if (n < 7) continue; // too short to be recognised as sealed at all
+      expect(() => openBundle(cut, PASS), `cut to ${n}`).toThrow(/wrong passphrase|damaged|not encrypted|not a valid/);
+    }
+  });
+
+  it("files written with the older, lighter key derivation can still be read", async () => {
+    const { createCipheriv, randomBytes, scryptSync } = await import("node:crypto");
+    const { gzipSync } = await import("node:zlib");
+    const b = await exportOrganization(src, O.org.slug);
+    const salt = randomBytes(16), iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", scryptSync(PASS, salt, 32), iv);
+    const body = Buffer.concat([cipher.update(gzipSync(Buffer.from(JSON.stringify(b)))), cipher.final()]);
+    const legacy = Buffer.concat([Buffer.from("TTORG1\n"), salt, iv, cipher.getAuthTag(), body]);
+    expect(openBundle(legacy, PASS).checksum).toBe(b.checksum);
+    expect(sealBundle(b, PASS).subarray(0, 7).toString()).toBe("TTORG2\n"); // new files use the stronger setting
+  });
+
+  it("refuses a file that unpacks to more than the allowed size", async () => {
+    const { gzipSync } = await import("node:zlib");
+    const bomb = gzipSync(Buffer.alloc(5_000_000, 97));
+    expect(bomb.length).toBeLessThan(20_000);
+    expect(() => openBundle(bomb, undefined, { maxBytes: 1_000_000 })).toThrow(/more than the allowed size/);
+    expect(() => openBundle(Buffer.from("not gzip at all"))).toThrow(/not a valid organization export/);
+  });
+});
+
+describe("export finds every table, including ones the exporting role has no right to read", () => {
+  it("fails loudly instead of leaving a table out", async () => {
+    const role = `tt_blind_${Math.random().toString(36).slice(2, 8)}`;
+    await src.query(`create role ${role} login password 'x' bypassrls`);
+    try {
+      await src.query(`grant usage on schema public, drizzle to ${role}`);
+      await src.query(`grant select on all tables in schema public to ${role}`);
+      await src.query(`grant select on all tables in schema drizzle to ${role}`); // the migration table is read for the schema fingerprint
+      await src.query(`revoke select on labels from ${role}`);
+      const u = new URL(SOURCE_URL); u.username = role; u.password = "x";
+      const blind = new pg.Client({ connectionString: u.toString() });
+      await blind.connect();
+      try {
+        // information_schema would not list `labels` for this role and the bundle would simply be missing it
+        await expect(exportOrganization(blind, O.org.slug)).rejects.toThrow(/permission denied for table labels/);
+      } finally { await blind.end(); }
+    } finally {
+      await src.query(`drop owned by ${role}`);
+      await src.query(`drop role ${role}`);
+    }
+  });
+});
+
 describe("bundle integrity", () => {
   it("rejects a bundle whose content was changed after it was written", async () => {
     const b = await exportOrganization(src, O.org.slug);

@@ -1,3 +1,4 @@
+import { taskLink } from "@/lib/links";
 import { and, eq } from "drizzle-orm";
 import { deliveryAttempts, memberships, notificationPrefs, notifications } from "@/db/schema";
 import { quietHoursEnd } from "@/domain/notifications";
@@ -44,7 +45,7 @@ export const notificationEmail: JobHandler = async (ctx, job) => {
 
   // 2) Send. Idempotency-Key makes a retry after an ambiguous failure safe at the provider.
   const { to, locale, text, taskId } = plan.send;
-  const link = taskId ? `${ctx.appUrl}/o/${orgId}/tasks/${taskId}` : ctx.appUrl;
+  const link = taskId ? taskLink(ctx.appUrl, orgId, taskId) : ctx.appUrl;
   try {
     await ctx.email.send({ to, subject: t(locale, "email.notification.subject", { app: t(locale, "app.name"), title: text }), text: `${text}\n\n${link}`, idempotencyKey: `notification-${notificationId}` });
   } catch (e) {

@@ -7,7 +7,7 @@ import {
 } from "@/db/schema";
 import { AppError, conflict, validation } from "@/lib/errors";
 import { enqueue } from "@/jobs/queue";
-import { isOrgAdmin, listMyMemberships, lockOrgAdmins, otherOrgAdmins, setCtx } from "./account";
+import { isOrgAdmin, listMyMemberships, lockOrgAdmins, otherOrgAdmins, setCtx, voidInvitationsOf } from "./account";
 import { accessibleProjectIds } from "./scope";
 import { withTenant } from "./tenant";
 
@@ -280,6 +280,7 @@ export async function eraseAccount(db: Db, user: { id: string; email: string }, 
       await tx.delete(digestLog).where(and(eq(digestLog.orgId, m.orgId), eq(digestLog.userId, user.id)));
       await tx.delete(savedViews).where(and(eq(savedViews.orgId, m.orgId), eq(savedViews.ownerId, user.id)));
       await tx.update(memberships).set({ status: "revoked" }).where(eq(memberships.id, m.id));
+      await voidInvitationsOf(tx, m.orgId, { userId: user.id, email: user.email });
       await tx.insert(auditLogs).values({ orgId: m.orgId, actorUserId: user.id, action: "account.erased", targetType: "user", targetId: user.id, metadata: { previousStatus: m.status, abandoned: m.status === "approved" && !!o.abandonOrganizations } });
     }
 

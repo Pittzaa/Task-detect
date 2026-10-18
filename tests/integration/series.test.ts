@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { AppError } from "@/lib/errors";
 import { withTenant } from "@/data/tenant";
+import { assignRole, createCustomRole } from "@/data/account";
 import { changeStatus, getTask, setAssignees } from "@/data/tasks";
 import { createSeries, deleteSeries, generateForSeriesAsCreator, generateOccurrences, listSeries, updateSeries } from "@/data/series";
 import { memberships, recurrenceSeries, tasks } from "@/db/schema";
@@ -19,7 +20,8 @@ const biweekly = { freq: "weekly", interval: 2, weekdays: [1] };
 
 beforeAll(async () => {
   O = await makeOrg(c.admin, "SeriesOrg");
-  for (const k of ["mgr", "mem", "view", "other"]) u[k] = await makeUser(c.admin, k);
+  for (const k of ["mgr", "mem", "view", "other", "boss", "planner"]) u[k] = await makeUser(c.admin, k);
+  await addMember(c.admin, O.org.id, u.boss!.id, { role: "orgadmin" });
   await addMember(c.admin, O.org.id, u.mgr!.id, { role: "manager" });
   await addMember(c.admin, O.org.id, u.mem!.id, { role: "member" });
   await addMember(c.admin, O.org.id, u.view!.id, { role: "viewer" });
@@ -32,6 +34,28 @@ const mkSeries = (over: Record<string, unknown> = {}) =>
     const r = await createSeries(s, { projectId: O.project.id, title: "Sprint review", rule: biweekly, startDate: TODAY, timezone: "Asia/Bangkok", ...over } as never, TODAY);
     return r;
   });
+
+describe("who a series may assign", () => {
+  it("a role with series.manage but not task.assign can only assign themselves; a manager can assign anyone who can read the project", async () => {
+    const role = await run("boss", (s) => createCustomRole(s, { key: "planner", name: "Planner", permissions: ["org.read", "project.read", "task.read", "task.create", "series.manage"] }));
+    const m = await addMember(c.admin, O.org.id, u.planner!.id, {});
+    await run("boss", (s) => assignRole(s, { membershipId: m.id, roleId: role.id, scope: { type: "organization" } }));
+    const make = (primaryAssigneeId?: string) => run("planner", (s) => createSeries(s, { projectId: O.project.id, title: "Planned", rule: biweekly, startDate: TODAY, timezone: "Asia/Bangkok", primaryAssigneeId } as never, TODAY));
+
+    expect(await code(make(u.mem!.id))).toBe("FORBIDDEN");
+    expect(await code(make(u.planner!.id))).toBe("OK"); // taking it themselves
+    expect(await code(make())).toBe("OK"); // nobody
+
+    const { series } = await make(u.planner!.id);
+    const edit = (primaryAssigneeId: string | null) => run("planner", (s) => updateSeries(s, series.id, { primaryAssigneeId }, "open_future", TODAY));
+    expect(await code(edit(u.mem!.id))).toBe("FORBIDDEN");
+    expect(await code(edit(null))).toBe("OK"); // dropping themselves
+    // handing it to somebody, then the planner cannot take that person off again
+    await run("mgr", (s) => updateSeries(s, series.id, { primaryAssigneeId: u.mem!.id }, "open_future", TODAY));
+    expect(await code(edit(null))).toBe("FORBIDDEN");
+    expect(await code(edit(u.mem!.id))).toBe("OK"); // unchanged: nothing to authorise
+  });
+});
 
 describe("creating and generating", () => {
   it("every-two-weeks series generates occurrences through the horizon with correct dates", async () => {

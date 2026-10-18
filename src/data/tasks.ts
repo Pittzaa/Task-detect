@@ -264,8 +264,10 @@ export async function setAssignees(s: TenantSession, taskId: string, input: { pr
   const removed = before.filter((u) => !after.includes(u));
   if (!added.length && !removed.length && task.primaryAssigneeId === input.primary) return task;
 
-  // Taking or leaving a task yourself needs task.update; changing anyone else needs task.assign.
-  const onlySelf = [...added, ...removed].every((u) => u === s.userId);
+  // Taking or leaving a task yourself needs task.update; changing anyone else needs task.assign. Changing who is primary changes
+  // the role of the old and the new primary even when nobody is added or removed.
+  const affected = [...added, ...removed, ...(task.primaryAssigneeId !== input.primary ? [task.primaryAssigneeId, input.primary] : [])];
+  const onlySelf = affected.every((u) => u === null || u === s.userId);
   need(s, onlySelf ? "task.update" : "task.assign", scope);
   for (const u of added) await assertAssignable(s, u, scope);
 

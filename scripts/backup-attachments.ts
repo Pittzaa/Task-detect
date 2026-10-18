@@ -10,7 +10,7 @@ import { syncAttachments } from "../src/ops/backup-attachments";
  *   pnpm backup:attachments --to fs:/mnt/backup/attachments        # backup (incremental; writes manifests/<time> into the destination)
  *   pnpm backup:attachments --to blob                              # a second Vercel Blob store: BACKUP_BLOB_READ_WRITE_TOKEN
  *   pnpm backup:attachments --restore --from fs:/mnt/backup/attachments   # AFTER restoring the database: copy missing/damaged files back
- * Options: --org <uuid>  --dry-run  --verify (re-download existing copies and check their SHA-256; slow on a hosted store)
+ * Options: --org <uuid>  --dry-run  --allow-local-store (restore into .data/uploads when no Blob token is set)  --verify (re-download existing copies and check their SHA-256; slow on a hosted store)
  * The live store is BLOB_READ_WRITE_TOKEN, or .data/uploads when no token is set. Uses DATABASE_URL (the runtime role).
  * Exit code 1 when a problem was found (missing/corrupt source, failed copy). Nothing is ever deleted. See docs/BACKUP_RESTORE.md §2.3.
  */
@@ -30,6 +30,11 @@ const arg = (name: string) => { const i = process.argv.indexOf(name); return i >
 const env = getEnv();
 const live: ObjectStore = env.BLOB_READ_WRITE_TOKEN ? createBlobStore(env.BLOB_READ_WRITE_TOKEN) : createFsStore(".data/uploads");
 const restore = process.argv.includes("--restore");
+// Without the token the live store is a folder on this machine, not production: say so, and never restore into it by accident.
+console.log(`live store: ${env.BLOB_READ_WRITE_TOKEN ? "Vercel Blob (BLOB_READ_WRITE_TOKEN)" : "local folder .data/uploads (BLOB_READ_WRITE_TOKEN is not set)"}`);
+if (restore && !env.BLOB_READ_WRITE_TOKEN && !process.argv.includes("--allow-local-store")) {
+  throw new Error("BLOB_READ_WRITE_TOKEN is not set, so --restore would copy files into the local folder .data/uploads and leave the real store untouched. Export the token, or pass --allow-local-store if that is what you want.");
+}
 const other = parseStore(restore ? arg("--from") : arg("--to"), restore ? "--from" : "--to");
 const { db, close } = createDb(env.DATABASE_URL);
 

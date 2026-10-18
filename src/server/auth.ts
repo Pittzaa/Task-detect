@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { twoFactor } from "better-auth/plugins";
 import { eq } from "drizzle-orm";
@@ -30,6 +31,30 @@ export const timeZoneSchema = z.string().refine((tz) => {
     return false;
   }
 }, "invalid time zone");
+
+/** Control, bidi and line-separator characters have no place in a name that is shown in lists and put into e-mails and chat messages. */
+const NAME_FORBIDDEN = new RegExp("[\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]");
+export const displayNameSchema = z.string().trim().min(1).max(100).refine((v) => !NAME_FORBIDDEN.test(v), "invalid characters");
+const imageSchema = z.string().max(2048);
+
+/** Better Auth writes `name` and `image` as it receives them; this is the one place that bounds them, for sign-up and update-user alike. */
+function checkProfile<T extends { name?: unknown; image?: unknown }>(user: T, partial: boolean): T {
+  const out = { ...user };
+  if (!partial || out.name !== undefined) {
+    const name = displayNameSchema.safeParse(out.name);
+    if (!name.success) throw new APIError("BAD_REQUEST", { message: "Name must be 1-100 characters without control characters", code: "INVALID_NAME" });
+    out.name = name.data;
+  }
+  if (out.image !== undefined && out.image !== null && !imageSchema.safeParse(out.image).success) {
+    throw new APIError("BAD_REQUEST", { message: "Image address is too long", code: "INVALID_IMAGE" });
+  }
+  return out;
+}
+
+export function cleanProviderName(name: unknown, email: string): string {
+  const cleaned = String(name ?? "").replace(new RegExp(NAME_FORBIDDEN.source, "g"), " ").replace(/\s+/g, " ").trim().slice(0, 100).trim();
+  return cleaned || email.split("@")[0]!.slice(0, 100) || "User";
+}
 
 export function createAuth(deps: AuthDeps) {
   const { db, email } = deps;
@@ -109,6 +134,17 @@ export function createAuth(deps: AuthDeps) {
       },
     },
     databaseHooks: {
+      user: {
+        create: {
+          before: async (user, ctx) => {
+            // A name chosen by a person is refused; one handed over by Google is cleaned instead, so that an unusual display
+            // name there cannot make sign-in fail.
+            if (ctx?.path?.startsWith("/callback")) return { data: { ...user, name: cleanProviderName(user.name, user.email) } };
+            return { data: checkProfile(user, false) };
+          },
+        },
+        update: { before: async (user) => ({ data: checkProfile(user, true) }) },
+      },
       session: {
         create: {
           before: async (session) => {

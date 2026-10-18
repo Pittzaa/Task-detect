@@ -1,3 +1,4 @@
+import { taskLink } from "@/lib/links";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { deliveryAttempts, integrationDestinations, projectTeams, tasks } from "@/db/schema";
 import { decryptSecret } from "@/lib/crypto";
@@ -40,7 +41,7 @@ export const discordSend: JobHandler = async (ctx, job) => {
       : ((await tx.execute(sql`select 1 from ${projectTeams} where ${projectTeams.orgId} = ${orgId} and ${projectTeams.projectId} = ${task.projectId} and ${projectTeams.teamId} = ${d.teamId} limit 1`)) as unknown as { rows: unknown[] }).rows.length > 0;
     if (!inScope) return { skip: "out_of_scope" as const };
     const label = (LABEL[event] ?? LABEL["task.status_changed"]!)[DEFAULT_LOCALE];
-    const link = `${ctx.appUrl}/o/${orgId}/tasks/${task.id}`;
+    const link = taskLink(ctx.appUrl, orgId, task.id);
     const body = d.includeDetails
       ? `🔔 [${plain(d.name, 60)}] ${label}: ${plain(task.title)} (${t(DEFAULT_LOCALE, `status.${task.status}` as never)})\n${link}`
       : `🔔 [${plain(d.name, 60)}] ${label}\n${link}`;

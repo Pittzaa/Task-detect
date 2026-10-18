@@ -181,8 +181,8 @@ function parseInline(src: string, b: Budget, depth = 0, inLink = false): Inline[
       pushText(out, ch); i++; continue;
     }
 
-    if ((ch === "h" || ch === "H") && !inLink && !isWordChar(src[i - 1]) && /^https?:\/\//i.test(src.slice(i, i + 8))) {
-      const m = /^https?:\/\/[^\s<>]+/i.exec(src.slice(i, i + 2100))!;
+    if ((ch === "h" || ch === "H") && !inLink && !isWordChar(src[i - 1]) && /^https?:\/\/[^\s<>]/i.test(src.slice(i, i + 9))) {
+      const m = /^https?:\/\/[^\s<>]+/i.exec(src.slice(i, i + 2100))!; // non-null: the test above has seen a first character after "//"
       let url = m[0];
       // trailing punctuation belongs to the sentence, and an unbalanced ")" to the surrounding parentheses
       for (;;) {

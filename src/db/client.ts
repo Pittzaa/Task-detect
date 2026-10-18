@@ -29,11 +29,16 @@ export function createDb(connectionString: string): { db: Db; close: () => Promi
  */
 export async function checkRlsEnforceable(db: Db): Promise<string | null> {
   const res = (await db.execute(
-    sql`select rolsuper, rolbypassrls from pg_roles where rolname = current_user`,
-  )) as unknown as { rows: { rolsuper: boolean; rolbypassrls: boolean }[] };
+    sql`select rolsuper, rolbypassrls,
+          coalesce((select pg_has_role(current_user, c.relowner, 'USAGE') from pg_class c where c.oid = 'public.organizations'::regclass), false) as owns
+        from pg_roles where rolname = current_user`,
+  )) as unknown as { rows: { rolsuper: boolean; rolbypassrls: boolean; owns: boolean }[] };
   const row = res.rows[0];
   if (!row) return "current database role not found";
   if (row.rolsuper) return "runtime role is a superuser; RLS is bypassed";
   if (row.rolbypassrls) return "runtime role has BYPASSRLS; RLS is bypassed";
+  // Some policies are written for the owner only (creating organizations, system roles, the audit purge). A runtime role that is,
+  // or inherits, the owner would get those powers: the application must connect as a separate least-privilege role (scripts/grants.sql).
+  if (row.owns) return "runtime role owns the tables (or belongs to the role that does); owner-only policies would apply to it";
   return null;
 }
