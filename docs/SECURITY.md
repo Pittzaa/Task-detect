@@ -43,7 +43,7 @@ Evidence: T `rbac.test.ts`, `account.test.ts`, `tasks.test.ts` (42), `productivi
 
 * Email + password (min 12, max 128 characters), **email verification required before sign-in**, Google sign-in optional, TOTP two-factor with **backup codes** (single use; the sign-in page offers them) — T `auth.test.ts` (18), E `01-onboarding`, `04-security`.
 * Self-registration is gated by **administrator approval**; invitations are one-time, expire in 7 days, are bound to the invited e-mail address, and are stored **hashed** — a stranger cannot redeem someone else’s link (E `04-security`/`01-onboarding`, T `account.test.ts`).
-* Session cookies: `HttpOnly`, `SameSite=Lax`, `Secure` in production; 7-day sessions refreshed daily; the user can list and revoke sessions and sign out other devices (E `04-security`). Password reset invalidates by token expiry (Better Auth defaults, C).
+* Session cookies: `HttpOnly`, `SameSite=Lax`; in a production tier also `Secure` with the `__Secure-` prefix (T `auth-hardening.test.ts`); 7-day sessions refreshed daily; the user can list and revoke sessions and sign out other devices (E `04-security`). Password reset invalidates by token expiry (Better Auth defaults, C).
 * **No account enumeration** on the paths probed live on 2026-10-17: wrong password vs unknown user return the identical `401 Invalid email or password`; password-reset returns the identical message for known and unknown addresses; the organization-code form answers identically for valid and invalid codes (E `01-onboarding`); sign-up for an existing e-mail returns a normal-looking success with a synthetic user. M.
 * Brute-force limits (database-backed, work across serverless instances): sign-in 5/min, sign-up 10/h, reset request 5/h, TOTP and backup-code verification 5/min, verification e-mail 5/h; application limits: join 5/h, invite 50/h, accept 10/h, upload 20/min, bulk 20/10 min, search 120/min, task create 120/min, comment 60/min, calendar connect 10/h. T `auth.test.ts`, E `06-hardening` (search → 429 `RATE_LIMITED` at the 121st call).
 * **CSRF:** mutating API calls require an `Origin` header equal to the configured `APP_URL`; a foreign or missing origin gets 403 (E `04-security`, `pnpm smoke`). Combined with `SameSite=Lax` cookies.
@@ -99,11 +99,22 @@ Durable Postgres job queue: leases, bounded retries with jittered back-off, dead
 7. **Row-level security was never enforced at runtime** (`checkRlsEnforceable` existed but nothing called it): now a guard in `withTenant`/worker contexts in production tiers.
 8. **No security headers / CSP:** added (see §2.4). No request ids: added `x-request-id` (caller ids accepted only if they match `^[A-Za-z0-9-]{8,64}$`).
 
+### Final test pass (route sweep, race tests, UI administration tests) — additional findings, all fixed
+
+9. **HTTP 500 on a NUL character** in any text (`?q=%00`, a title containing `\u0000`): PostgreSQL cannot store it and the driver surfaced an internal error. Now rejected at every boundary with a 422 (`handle()`, `readJson`, and the Better Auth route). Found by the all-routes sweep.
+10. **Attachment cap race:** simultaneous uploads from several users stored 28 files on a task capped at 25. The upload now locks the task row. Found by `concurrency.test.ts`.
+11. **Bulk-update deadlock:** two bulk requests over the same tasks in opposite orders deadlocked (≈ 13 s) and reported items as `ERROR`. Rows are now locked in one global order and the version read is taken under the lock. Found by `concurrency.test.ts`.
+12. **Calendar connect answered before the membership check** (a non-member could learn whether Google is configured). Order fixed; the sweep requires 404 for every route and method.
+13. **Irreversible administrator actions had no confirmation** (revoke a member, delete a role / Discord destination / custom field): added.
+14. **A refused custom-field value was thrown away** from the form instead of being kept for correction; fixed.
+15. Verified rather than fixed: password reset **does** revoke all other sessions; sign-in `next` cannot redirect off-site (7 hostile forms tried); no permissive CORS headers or honoured preflights; suspension and role removal take effect on the very next request; mass assignment through sign-up / update-user / `PATCH /api/me` is ignored or refused.
+
 ## 5. What has NOT been verified
 
 * **Any real third-party service.** Resend, Google (OAuth, Calendar API), Discord, Vercel Blob, Vercel Cron and Neon were never contacted. Their behaviour is represented by fakes (`tests/integration/google-fake.ts`, injected `fetch`, a file e-mail sink, an in-memory/filesystem object store). Mock-based tests prove *our* handling of the documented request/response shapes, not that the live service accepts the requests. Use `docs/DEPLOYMENT.md` §8.
 * **Neon specifics:** transaction-local `set_config` through the pooler, the default owner’s attributes (`BYPASSRLS`), plan limits, point-in-time restore.
-* **Penetration test / independent review:** none. No fuzzing, no load or denial-of-service testing, no automated DAST scan.
+* **Penetration test / independent review:** none. The all-routes sweep sends > 500 malformed requests and cross-tenant probes with real ids, but it is a scripted regression test, not an adversarial human assessment, and there was no load or denial-of-service testing and no DAST scanner run.
+* **What row-level security does and does not protect:** it stops *application bugs* (a forgotten `WHERE org_id`) from leaking data. It does **not** stop an attacker who can already execute arbitrary SQL as the runtime role, because that role can set the same session variables the application sets (`app.org_id`, `app.worker`). Preventing SQL injection is therefore the first line (all queries are parameterized through Drizzle; the source contains no `sql.raw` and no string-built SQL — checked by search), and database credentials must be protected like the data itself.
 * **Browser coverage:** Chromium only (desktop and a 375 px viewport); Firefox/Safari not run. Screen readers were not used; axe covers the rules it can detect automatically (≈ 30–40 % of WCAG issues), so manual testing is still required.
 * Password-hash parameters and token entropy are Better Auth defaults (C); invitation/state tokens are 256-bit random values (C).
 * Malware scanning of uploads; e-mail bounce/complaint handling; WAF; per-IP rate limiting at the edge (limits here are per user/key in the database; Vercel/Cloudflare firewall rules are recommended in front).

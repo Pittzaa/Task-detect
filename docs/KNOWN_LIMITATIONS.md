@@ -34,6 +34,8 @@ Use `pnpm verify:database`, `pnpm smoke`, `pnpm verify:attachments` and the manu
 * **Attachment content:** type is sniffed from bytes, but there is no malware scan and no preview/thumbnail generation.
 * **Dependency advisory (accepted):** `braces` ≤ 3.0.3 via ESLint tooling, dev-only, no patched version published ([SECURITY.md](SECURITY.md) §3).
 * **Concurrent role edits** are guarded by advisory locks for the last-administrator rule, but two administrators editing the same person’s roles at once get last-write-wins semantics on separate assignments.
+* **No “change password” screen for signed-in users** (only the e-mailed reset flow, which does sign out all other sessions). Users can change their password by requesting a reset.
+* **Lists** are paged with `offset` capped at 10 000 rows; beyond that use filters. **Notification and permission checkboxes** wait for the server before changing state (no optimistic update), which feels slow on bad connections.
 * **Search** is substring/trigram, not linguistic: Thai word segmentation is not applied, so partial-word matches work but ranking is basic.
 * **Calendar sync** is one-way and per user; shared/team calendars, attendee invitations and time-of-day events are not supported (all-day events from dates).
 * **Time zones:** a user’s zone is set from the browser at registration; there is no automatic travel detection.
