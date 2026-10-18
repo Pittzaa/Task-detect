@@ -25,6 +25,7 @@
     "e2e:setup": "tsx scripts/e2e-setup.ts",
     "backup:restore-test": "tsx scripts/backup-restore-test.ts",
     "verify:attachments": "tsx scripts/verify-attachments.ts",
+    "backup:attachments": "tsx scripts/backup-attachments.ts",
     "verify:database": "tsx scripts/verify-database.ts",
     "smoke": "tsx scripts/smoke.ts",
     "rotate:key": "tsx scripts/rotate-encryption-key.ts",

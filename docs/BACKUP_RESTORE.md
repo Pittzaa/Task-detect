@@ -52,13 +52,25 @@ An example GitHub Actions job is at the end of this file — **untested**.
 * **Access control:** the archive contains every tenant’s data, password hashes and (encrypted) integration secrets. Store it in a bucket only the backup operator can read; do not put it in the repository or in Vercel.
 * **Retention:** keep at least 30 daily + 12 monthly archives, subject to your data-protection obligations (a restored archive resurrects deleted data — see [RETENTION.md](RETENTION.md)).
 
-### 2.3 Attachments (not solved by this repository)
+### 2.3 Attachments (files)
 
-Vercel Blob is not backed up by anything here. Options, in increasing effort: (a) accept that attachment bytes are only as durable as Blob;
-(b) periodically copy the store to a second bucket (a script using `ObjectStore.list/get` is straightforward but is **not written or tested**);
-(c) keep Blob’s own versioning/replication if your plan offers it **(verify)**.
-After *any* database restore run `pnpm verify:attachments` (read-only): it lists database rows whose file is missing, whose size differs, and (with `--hashes`)
-whose SHA-256 differs, and counts files no row references. Files uploaded after the backup become unreferenced and are removed by the orphan sweep after 24 h.
+A database dump does not contain attachment files. `pnpm backup:attachments` copies every file the database references into a **second store** and back:
+
+```bash
+# backup (incremental: files are immutable, so an existing copy with the right size is skipped). Writes manifests/<time> into the destination.
+pnpm backup:attachments --to fs:/mnt/backup/attachments        # a directory (an attached disk, a mounted bucket) …
+BACKUP_BLOB_READ_WRITE_TOKEN=… pnpm backup:attachments --to blob   # … or a SECOND Vercel Blob store (refuses the live token)
+# after restoring the DATABASE: copy missing or damaged files back into the live store
+pnpm backup:attachments --restore --from fs:/mnt/backup/attachments
+# options: --org <uuid>  --dry-run  --verify (download existing copies and check SHA-256: slow on a hosted store)
+```
+
+Rules the tool follows (tests: `tests/integration/backup-attachments.test.ts`, 6 tests, three deliberate breakages caught):
+a file is copied only if its size **and SHA-256 match what the database recorded** (a damaged live file is reported and never overwrites a good backup copy); a damaged copy in the destination is replaced; every copy is read back and verified; nothing is ever deleted (backup-only files are counted as `destinationOnly`, prune them yourself once you are sure no database you might restore still needs them); exit code 1 if anything could not be copied. Run it **after** `scripts/backup.sh` and keep the two in step: a file uploaded between the two is simply picked up by the next run.
+
+What is **not** verified: the Blob implementation (`createBlobStore`) has only been type-checked against the SDK — never run against a real Blob store. The copy logic is identical for both stores and is tested with two filesystem stores; run `--dry-run` and then a real run against your stores before relying on it. Where the destination should live (a second Blob store, or a bucket outside Vercel) is a decision for the owner.
+
+After *any* database restore also run `pnpm verify:attachments` (read-only): it lists database rows whose file is missing, whose size differs, and (with `--hashes`) whose SHA-256 differs, and counts files no row references. Files uploaded after the backup become unreferenced and are removed by the orphan sweep after 24 h.
 
 ## 3. Restore procedure (database)
 

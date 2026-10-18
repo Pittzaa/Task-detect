@@ -21,7 +21,7 @@ entries behaves as expected, and a blank *required* variable still fails validat
 | `APP_ENV` | no | `src/config/env.ts`, `src/server/runtime.ts` | See above. |
 | `APP_URL` | production | auth base URL, e-mail links, CSRF origin check, Google redirect URI | Public origin **without a trailing slash**, e.g. `https://tasks.example.com`. Must be `https` in production. Changing the domain changes the allowed origin. |
 | `DATABASE_URL` | **always** | runtime (`src/db/client.ts`) | Neon **pooled** connection string for the **least-privilege runtime role** (`NOSUPERUSER NOBYPASSRLS`). Verify it with `pnpm verify:database`. |
-| `DATABASE_URL_UNPOOLED` | for migrations, bootstrap, backups | `scripts/migrate.ts`, `scripts/bootstrap.ts`, `drizzle.config.ts`, `scripts/backup.sh` | Neon **direct** connection string for the **owner** role. Never give this to the running application. |
+| `DATABASE_URL_UNPOOLED` | for migrations, bootstrap, backups | `scripts/migrate.ts`, `scripts/bootstrap.ts`, `scripts/org-transfer.ts` (needs `BYPASSRLS`), `scripts/privacy.ts` (use the runtime role), `drizzle.config.ts`, `scripts/backup.sh` | Neon **direct** connection string for the **owner** role. Never give this to the running application. |
 | `LOG_LEVEL` | no (`info`) | `src/lib/logger.ts` | `fatal error warn info debug trace silent`. Secrets are redacted regardless. |
 | `BETTER_AUTH_SECRET` | production | session/cookie signing (`src/server/auth.ts`) | ≥ 32 random characters (`openssl rand -base64 48`). Rotating it signs everyone out. |
 | `APP_ENCRYPTION_KEY` | production | AES-256-GCM encryption of Discord webhook URLs and Google refresh tokens | 32 random bytes, base64: `openssl rand -base64 32`. **Losing it makes stored webhooks/tokens unreadable** (they must be re-entered / re-connected). Back it up in your password manager. |
@@ -45,6 +45,8 @@ entries behaves as expected, and a blank *required* variable still fails validat
 | `E2E_KEEP_DB=1` | `tests/e2e/global-setup.ts` | Re-use the previous E2E database to iterate on one later spec. A normal run always starts empty. |
 | `BACKUP_TEST_SOURCE_URL`, `BACKUP_TEST_ADMIN_URL` | `scripts/backup-restore-test.ts` | Source database and admin connection for the restore drill. |
 | `BACKUP_PASSPHRASE` | `scripts/backup.sh` | Encrypts the dump (AES-256, PBKDF2). Keep it separate from the backups themselves. |
+| `ORG_EXPORT_PASSPHRASE` | `pnpm org export/import` | ≥ 12 characters. Encrypts/decrypts the per-organization bundle (AES-256-GCM, scrypt). Without it the file is only compressed. |
+| `BACKUP_BLOB_READ_WRITE_TOKEN` | `pnpm backup:attachments` | Token of a SECOND Blob store used as backup destination/source. Must differ from `BLOB_READ_WRITE_TOKEN`. |
 | `APP_URL` + `CRON_SECRET` | `pnpm smoke` | Where to point the post-deployment smoke test. |
 
 ## Where to set them

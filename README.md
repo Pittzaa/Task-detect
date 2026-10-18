@@ -43,6 +43,7 @@ pnpm dev                                    # http://localhost:3000   (e-mails a
 | `pnpm verify:database` | prove the runtime role and policies on **your** database |
 | `pnpm smoke` | post-deployment HTTP checks |
 | `pnpm verify:attachments` | database ↔ object storage consistency |
+| `pnpm backup:attachments --to …` / `--restore --from …` | copy attachment files to a second store / back (operator) |
 | `pnpm backup:restore-test` / `scripts/backup.sh` | restore drill / logical backup |
 | `pnpm rotate:key` | re-encrypt stored secrets after rotating `APP_ENCRYPTION_KEY` |
 | `pnpm org export\|import` | one organization out of / into a database (partial restore, operator) |
