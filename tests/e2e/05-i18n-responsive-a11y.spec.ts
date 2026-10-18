@@ -114,6 +114,9 @@ test.describe("responsive layout (375 x 667 phone)", () => {
     const box = (await dialog.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(375 + 1);
+    // flush with the top of the window, and the backdrop covers the whole window (a spacing rule once pushed both down by 14 px)
+    expect(box.y).toBe(0);
+    expect((await page.locator(".drawer-scrim").boundingBox())!.y).toBe(0);
     await noHorizontalScroll(page, "task drawer");
     await dialog.getByRole("button", { name: "Close" }).click();
     await expect(dialog).toBeHidden();

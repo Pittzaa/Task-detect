@@ -133,6 +133,8 @@ tr.clickable:hover { background: var(--surface-2); }
 .drawer-scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); z-index: 50; }
 .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(720px, 100vw); background: var(--surface); z-index: 51; overflow: auto; padding: 1.1rem; box-shadow: -4px 0 16px rgba(0, 0, 0, 0.2); }
 .modal { position: fixed; left: 50%; top: 8vh; transform: translateX(-50%); width: min(560px, 94vw); max-height: 84vh; overflow: auto; background: var(--surface); z-index: 51; border-radius: var(--radius); padding: 1.1rem; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3); }
+/* a dialog is a fixed-position child of the page stack, whose "* + *" spacing rule would push it (and its backdrop) down by one gap */
+.stack > .drawer-scrim, .stack > .drawer, .stack > .modal { margin-top: 0; }
 .toasts { position: fixed; right: 1rem; bottom: 1rem; z-index: 80; display: flex; flex-direction: column; gap: 0.5rem; max-width: min(380px, 92vw); }
 .toast { padding: 0.65rem 0.9rem; border-radius: 8px; background: var(--text); color: var(--bg); box-shadow: var(--shadow); }
 .toast.error { background: var(--danger); color: #fff; }
