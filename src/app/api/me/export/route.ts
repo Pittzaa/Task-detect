@@ -1,7 +1,7 @@
 import { exportMyData } from "@/data/privacy";
 import { handle } from "@/server/api";
 
-/** A download of everything held about the signed-in user (GDPR/PDPA access request). Heavy, so rate limited per user. */
+/** A download of everything held about the signed-in user (a person's right to see what is held about them). Heavy, so rate limited per user. */
 export const GET = (req: Request) =>
   handle(
     req,

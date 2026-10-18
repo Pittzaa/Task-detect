@@ -97,6 +97,7 @@ beforeAll(async () => {
   await c.admin.insert(attachments).values({ orgId: O.org.id, taskId: parent.id, uploadedBy: u.admin!.id, storageKey: `xfer-${O.org.id}`, filename: "f.pdf", contentType: "application/pdf", sizeBytes: 5, sha256: "ab".repeat(32) });
   // the other tenant has data too: it must never end up in, or be touched by, the first organization's bundle
   await withTenant(c.app, as("xadmin", X.org.id), (s) => createTask(s, { projectId: X.project.id, title: "Other tenant secret" }));
+  await withTenant(c.app, as("xadmin", X.org.id), (s) => createCustomRole(s, { key: "reviewer", name: "Other tenant role", permissions: ["task.read"] }));
 });
 
 afterAll(async () => {
@@ -188,7 +189,12 @@ describe("import into another database", () => {
   it("refuses to overwrite without --replace, and refuses a different organization that uses the same code", async () => {
     const b = await exportOrganization(src, O.org.slug);
     await expect(importOrganization(dst, b, { apply: true })).rejects.toThrow(/already exists/);
-    const renamed = rewrap(b, (x) => { x.org.id = "00000000-0000-4000-8000-0000000000aa"; });
+    const NEW_ID = "00000000-0000-4000-8000-0000000000aa";
+    const renamed = rewrap(b, (x) => {
+      x.org.id = NEW_ID;
+      for (const rows of Object.values(x.tables)) for (const r of rows) { if ("org_id" in r) r.org_id = NEW_ID; }
+      x.tables.organizations![0]!.id = NEW_ID;
+    });
     await expect(importOrganization(dst, renamed, { apply: true })).rejects.toThrow(/another organization already uses the code/);
   });
 
@@ -319,6 +325,34 @@ describe("replace (partial restore in the same database)", () => {
     });
     await expect(importOrganization(src, poisoned, { replace: true, apply: true })).rejects.toThrow();
     expect(normalize(await exportOrganization(src, O.org.slug))).toEqual(snapshot);
+  });
+});
+
+describe("a hand-built bundle (checksum recomputed) cannot reach into another organization", () => {
+  it("refuses rows that belong to a different organization, before anything is written", async () => {
+    const good = await exportOrganization(src, O.org.slug);
+    const otherBefore = normalize(await exportOrganization(src, X.org.slug));
+    const snapshot = normalize(good);
+    const cases: [string, OrgBundle][] = [
+      ["tasks", rewrap(good, (x) => { x.tables.tasks!.push({ ...x.tables.tasks![0]!, id: "33333333-3333-4333-8333-333333333333", org_id: X.org.id, project_id: X.project.id }); })],
+      ["labels", rewrap(good, (x) => { x.tables.labels!.push({ ...x.tables.labels![0]!, id: "44444444-4444-4444-8444-444444444444", org_id: X.org.id }); })],
+      ["organizations", rewrap(good, (x) => { x.tables.organizations![0] = { ...x.tables.organizations![0]!, id: X.org.id }; })],
+    ];
+    for (const [table, bundle] of cases) {
+      await expect(importOrganization(src, bundle, { replace: true, apply: true }), table).rejects.toThrow(/another organization|belongs to/);
+      await expect(importOrganization(src, bundle, { replace: true }), `${table} (dry run)`).rejects.toThrow(/another organization|belongs to/);
+    }
+    expect(normalize(await exportOrganization(src, O.org.slug))).toEqual(snapshot);
+    expect(normalize(await exportOrganization(src, X.org.slug))).toEqual(otherBefore);
+  });
+
+  it("refuses permissions that point at a role of another organization", async () => {
+    const good = await exportOrganization(src, O.org.slug);
+    expect((good.tables.role_permissions ?? []).length).toBeGreaterThan(0);
+    const foreignRole = (await src.query<{ id: string }>("select id from roles where org_id = $1 limit 1", [X.org.id])).rows[0]?.id;
+    expect(foreignRole).toBeTruthy();
+    const bad = rewrap(good, (x) => { x.tables.role_permissions!.push({ ...x.tables.role_permissions![0]!, role_id: foreignRole! }); });
+    await expect(importOrganization(src, bad, { replace: true, apply: true })).rejects.toThrow(/role_permissions belongs to another organization/);
   });
 });
 

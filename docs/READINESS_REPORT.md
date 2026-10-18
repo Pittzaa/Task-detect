@@ -5,7 +5,7 @@ This report separates what was **verified** (command and result given), what was
 
 ## 1. Verdict
 
-* **As software, locally:** the application builds, passes every automated check that exists (673 unit/integration tests, 84 browser tests, static analysis, dependency audit for shipped code, a restore drill, a local load test, database and smoke verifications), and the final passes found and fixed the defects listed in §5.
+* **As software, locally:** the application builds, passes every automated check that exists (689 unit/integration tests, 84 browser tests, static analysis, dependency audit for shipped code, a restore drill, a local load test, database and smoke verifications), and the final passes found and fixed the defects listed in §5.
 * **As a service you can launch today: no.** It has **never run on Vercel, Neon, Resend, Google, Discord or Vercel Blob**, and no restore has been tested on a real Neon plan. Those are explicit **go-live blockers** (§4). Everything else is in good shape to hand over, with the limitations listed in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 
 ## 2. Commands run and their results
@@ -17,7 +17,7 @@ All against PostgreSQL 16.15 on a local cluster, Node 22.22, pnpm 10.28, Chromiu
 | `pnpm lint` | clean (no errors, no warnings) |
 | `pnpm typecheck` | clean |
 | `pnpm test:unit` | **266 / 266 passed** |
-| `TEST_DATABASE_URL=… pnpm test:integration` | **407 / 407 passed** |
+| `TEST_DATABASE_URL=… pnpm test:integration` | **423 / 423 passed** |
 | `pnpm build` | compiled successfully (all pages, 65 API routes, proxy, instrumentation) |
 | `pnpm exec playwright test tests/e2e` (fresh database, Chromium) | **84 / 84 passed** (10 spec files, ≈ 3.5 min) |
 | `pnpm audit --prod` | **No known vulnerabilities** |
@@ -28,7 +28,7 @@ All against PostgreSQL 16.15 on a local cluster, Node 22.22, pnpm 10.28, Chromiu
 | `scripts/backup.sh` with encryption | dump → AES-256 → checksum → decrypt → `pg_restore --list` verified; wrong passphrase rejected; refuses a role without `BYPASSRLS` (exit 3) |
 | Mutation checks (see [TESTING.md](TESTING.md)) | 32 deliberate breakages (6 on the original code, 26 on the extras), each caught by a test. Two of them were **not** caught at first (a work budget and a signal fingerprint) and the tests were made discriminating |
 
-Test inventory: 266 unit + 407 integration + 84 end-to-end = **757 automated tests**. Source ≈ 13 400 lines, tests ≈ 10 000 lines (TypeScript, excluding scripts).
+Test inventory: 266 unit + 423 integration + 84 end-to-end = **773 automated tests**. Source ≈ 13 400 lines, tests ≈ 10 000 lines (TypeScript, excluding scripts).
 
 Also run: `pnpm load` (60 000 tasks, 10 and 50 concurrent users, 0 errors; [TESTING.md](TESTING.md#load-test-pnpm-load)), the error-reporting delivery check against a local HTTPS stand-in for the tracker, and by-hand runs of `pnpm org` (export → `--replace` round trip on the E2E data: identical), `pnpm backup:attachments` and `pnpm privacy` against the E2E database with the least-privilege role.
 
@@ -70,6 +70,8 @@ Correctness: UI “today” in the wrong time zone, MFA backup codes unusable at
 Accessibility / layout: label-in-name on icon buttons, calendar grid roles, keyboard-unreachable scroll regions, off-screen menu in the tab order, mobile horizontal overflow from absolutely-positioned text.
 Details and evidence: [SECURITY.md](SECURITY.md) §4, [TESTING.md](TESTING.md).
 
+**Found in the whole-system security re-check, both fixed:** the sign-in throttle could be sidestepped by forging `X-Forwarded-For` wherever no platform overwrites that header (now also limited per account, counting only failures); organization bundles built by hand were refused only late, by a row-count check, instead of up front (now explicit). What that re-check did and did not cover is in [SECURITY.md](SECURITY.md) §5 — in particular, no independent reviewer read the code.
+
 **Found while building the optional extras (§6b), all fixed:** query parameters and user text leaking into error logs through Drizzle's and PostgreSQL's error messages (and through a stack trace that began with the multi-line message); an infinite re-subscription loop in the new change-signal hook (a non-memoized `subscribe` restarted polling on every render; caught because pages never became network-idle); a write-back race where merely opening a page re-saved the profile language and could overwrite a newer choice (caught as an intermittent end-to-end failure, fixed by never writing when syncing from the server); N+1 queries in the people lookup (3 per member) and in notification rendering (≈ 7 per notification); a dashboard doing four scans; a new route answering before it checked tenancy (caught by the cross-tenant sweep); and two tests that could not fail (a work budget and a signal fingerprint) which were made discriminating after a deliberate breakage passed them.
 
 ## 6. What was added in Phase 5
@@ -87,7 +89,7 @@ Details and evidence: [SECURITY.md](SECURITY.md) §4, [TESTING.md](TESTING.md).
 |---|---|
 | Change password for signed-in users (Security page, other devices signed out on request, rate limited) | ✅ integration + browser |
 | Error boundaries (`error.tsx`, `global-error.tsx`, `not-found.tsx`), request-error hook, **redacted** error reporting (Sentry protocol, optional) | ✅ locally; ⚠️ delivery checked against a stand-in tracker only |
-| Personal data export + account erasure (UI + `pnpm privacy`) | ✅ integration (9) + browser; not legally reviewed |
+| Personal data export + account erasure (UI + `pnpm privacy`) | ✅ integration (9) + browser (private use among agreeing friends; no legal review sought) |
 | Per-organization export/import / partial restore (`pnpm org`, encrypted bundle option) | ✅ two real databases (18 tests) + by hand on E2E data; ⚠️ never on Neon (needs a `BYPASSRLS` role) |
 | Attachment file backup/restore (`pnpm backup:attachments`) | ✅ two filesystem stores (6 tests); ⚠️ Blob implementation never run |
 | Direct browser → Blob uploads up to 25 MB | ✅ token + server-side inspection (14 tests); ❌ browser → Vercel Blob request unverified |
@@ -98,7 +100,7 @@ Details and evidence: [SECURITY.md](SECURITY.md) §4, [TESTING.md](TESTING.md).
 
 ## 7. Known limitations and decisions
 
-See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md): the unverified Blob direct upload, change-signal polling (not push), the Chromium-only test runs, a local-only load test, no APM, erasure/export not legally reviewed, and the decisions left to the owner.
+See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md): the unverified Blob direct upload, change-signal polling (not push), the Chromium-only test runs, a local-only load test, no APM, erasure/export built for private use among agreeing friends, with no legal review, and the decisions left to the owner.
 
 ## 8. Repository state
 

@@ -212,6 +212,17 @@ export function validateBundle(raw: unknown): OrgBundle {
   return b;
 }
 
+/** The checksum detects damage, not forgery: whoever builds a bundle by hand can recompute it. Every row must belong to the bundle's own organization. */
+export function assertOwnRows(plan: Pick<Plan, "order">, b: OrgBundle): void {
+  const ownRoles = new Set((b.tables.roles ?? []).map((r) => r.id));
+  for (const t of plan.order) {
+    (b.tables[t] ?? []).forEach((r, i) => {
+      const own = t === "organizations" ? r.id === b.org.id : t === "role_permissions" ? ownRoles.has(r.role_id) : r.org_id === b.org.id;
+      if (!own) throw new Error(`row ${i + 1} of ${t} belongs to another organization; refusing (nothing was changed)`);
+    });
+  }
+}
+
 export async function importOrganization(q: Q, bundle: OrgBundle, o: { replace?: boolean; apply?: boolean } = {}): Promise<ImportPlan> {
   const b = validateBundle(bundle);
   await assertOperator(q);
@@ -224,6 +235,7 @@ export async function importOrganization(q: Q, bundle: OrgBundle, o: { replace?:
       throw new Error(`schema mismatch: the bundle was written by a database with ${b.schema.migrations} migrations (${b.schema.fingerprint.slice(0, 12)}), this one has ${here.migrations} (${here.fingerprint.slice(0, 12)}). Run the same application version on both sides.`);
     }
     if (plan.order.join(",") !== b.tableOrder.join(",")) throw new Error("table layout differs from the bundle even though the migrations match; refusing");
+    assertOwnRows(plan, b);
 
     const clash = await q.query<{ id: string }>("select id from organizations where slug = $1 and id <> $2", [b.org.slug, b.org.id]);
     if (clash.rows.length) throw new Error(`another organization already uses the code "${b.org.slug}"; refusing`);

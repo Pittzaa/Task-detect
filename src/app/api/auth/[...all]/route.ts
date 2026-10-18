@@ -1,5 +1,6 @@
 import { toNextJsHandler } from "better-auth/next-js";
 import { NUL_MESSAGE } from "@/server/api";
+import { guardAccount } from "@/server/auth-throttle";
 import { getRuntime } from "@/server/runtime";
 
 // Better Auth owns sign-up/sign-in/session/2FA/reset routes and its own origin + rate-limit checks.
@@ -15,4 +16,4 @@ async function rejectNul(req: Request): Promise<Response | null> {
 }
 
 export const GET = async (req: Request) => (await rejectNul(req)) ?? h().GET(req);
-export const POST = async (req: Request) => (await rejectNul(req)) ?? h().POST(req);
+export const POST = async (req: Request) => (await rejectNul(req)) ?? guardAccount(req, getRuntime().db, () => h().POST(req));
