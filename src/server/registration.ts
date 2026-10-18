@@ -1,0 +1,83 @@
+import { and, eq, gt, isNull } from "drizzle-orm";
+import type { Db } from "@/db/client";
+import { invitations, organizations } from "@/db/schema";
+import { withWorker, withWorkerOrg } from "@/jobs/context";
+import { AppError } from "@/lib/errors";
+import { consumeRateLimit } from "./rate-limit";
+
+export interface RegistrationState {
+  /** Organizations that exist. This product is meant to run with exactly one. */
+  organizations: number;
+  /** Whether a person without an invitation may sign up (no organization yet, or at least one that allows it). */
+  open: boolean;
+}
+
+/** One cheap read, usable before anybody is signed in. Reveals only counts and a flag. */
+export async function registrationState(db: Db): Promise<RegistrationState> {
+  const orgs = await liveOrgs(db);
+  return { organizations: orgs.length, open: orgs.length === 0 || orgs.some((o) => o.open) };
+}
+
+/**
+ * May this address create an account? Yes while registration is open; once an administrator closes it, only for an address
+ * that holds a valid, unused invitation (that is how the first administrator and later invitees get in). Checked when the
+ * user row is created, so it covers e-mail sign-up and Google sign-in alike.
+ */
+export async function canRegister(db: Db, email: string): Promise<boolean> {
+  const orgs = await liveOrgs(db);
+  if (orgs.length === 0 || orgs.some((o) => o.open)) return true;
+  const address = email.trim().toLowerCase();
+  const now = new Date();
+  for (const org of orgs) {
+    const [hit] = await withWorkerOrg(db, org.id, (tx) =>
+      tx
+        .select({ id: invitations.id })
+        .from(invitations)
+        .where(and(eq(invitations.orgId, org.id), eq(invitations.email, address), isNull(invitations.acceptedAt), isNull(invitations.revokedAt), gt(invitations.expiresAt, now)))
+        .limit(1),
+    );
+    if (hit) return true;
+  }
+  return false;
+}
+
+/** Sign-up attempts that may be made per hour, all callers together, while registration is closed (see refuseClosedSignUp). */
+export const CLOSED_SIGNUP_PER_HOUR = 60;
+
+/**
+ * In front of Better Auth's sign-up route: while registration is closed, an address without an invitation gets an honest 403
+ * instead of the look-alike "check your e-mail" answer Better Auth gives when it quietly declines to create an account.
+ * (The user-creation hook in auth.ts refuses too; this is what lets the person be told.)
+ *
+ * That honest answer also tells the caller whether an address has a pending invitation, so while closed every attempt, invited
+ * or not, takes from one shared hourly allowance and gets 429 once it is used up. Nothing about the address is revealed to
+ * a caller who is over the allowance, and the allowance does not depend on the caller's address (which a caller can forge).
+ */
+export async function refuseClosedSignUp(req: Request, db: Db): Promise<Response | null> {
+  if (req.method !== "POST" || !new URL(req.url).pathname.endsWith("/sign-up/email")) return null;
+  const body = (await req.clone().json().catch(() => null)) as { email?: unknown } | null;
+  if (typeof body?.email !== "string") return null;
+  if ((await registrationState(db)).open) return null;
+  try {
+    await consumeRateLimit(db, "signup:closed", 3600, CLOSED_SIGNUP_PER_HOUR);
+  } catch (e) {
+    if (e instanceof AppError && e.code === "RATE_LIMITED") {
+      return Response.json({ message: "Too many requests. Please try again later.", code: "RATE_LIMITED" }, { status: 429, headers: { "cache-control": "no-store", "retry-after": "3600" } });
+    }
+    throw e;
+  }
+  if (await canRegister(db, body.email)) return null;
+  return Response.json({ message: "Registration is closed", code: "REGISTRATION_CLOSED" }, { status: 403, headers: { "cache-control": "no-store" } });
+}
+
+/** The organization a person without a code is asking to join: only well defined while exactly one organization exists. */
+export async function soleOrganization(db: Db): Promise<{ id: string; open: boolean } | null> {
+  const orgs = await liveOrgs(db);
+  return orgs.length === 1 ? orgs[0]! : null;
+}
+
+function liveOrgs(db: Db) {
+  return withWorker(db, (tx) =>
+    tx.select({ id: organizations.id, open: organizations.registrationOpen }).from(organizations).where(isNull(organizations.deletedAt)).limit(50),
+  );
+}

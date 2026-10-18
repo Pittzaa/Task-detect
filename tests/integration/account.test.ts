@@ -139,7 +139,7 @@ describe("invitations", () => {
 
   it("bootstrap creates an org plus an orgadmin invitation that works end to end", async () => {
     const slug = `boot-${Date.now()}`;
-    const r = await bootstrapOrganization(c.admin, { name: "Boot Org", slug, adminEmail: "Boss@Example.test", appUrl: "http://localhost:3000" });
+    const r = await bootstrapOrganization(c.admin, { name: "Boot Org", slug, adminEmail: "Boss@Example.test", appUrl: "http://localhost:3000", allowAdditional: true });
     const token = new URL(r.inviteUrl).searchParams.get("token")!;
     const boss = await makeUser(c.admin, "boss");
     await c.admin.update(users).set({ emailVerified: true, email: "boss@example.test" }).where(eq(users.id, boss.id));

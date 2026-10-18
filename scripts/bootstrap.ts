@@ -9,6 +9,7 @@ const { values } = parseArgs({
     "admin-email": { type: "string" },
     "app-url": { type: "string" },
     superadmin: { type: "string" },
+    "allow-additional": { type: "boolean" },
   },
 });
 
@@ -22,10 +23,11 @@ try {
     console.log(`platform admin flag set for ${values.superadmin}`);
   } else {
     if (!values.name || !values.slug || !values["admin-email"]) {
-      throw new Error("usage: pnpm bootstrap --name <org name> --slug <code> --admin-email <email> [--app-url <url>]");
+      throw new Error("usage: pnpm bootstrap --name <org name> --slug <code> --admin-email <email> [--app-url <url>] [--allow-additional]");
     }
     const r = await bootstrapOrganization(db, {
       name: values.name, slug: values.slug, adminEmail: values["admin-email"], appUrl: values["app-url"] ?? process.env.APP_URL ?? "http://localhost:3000",
+      allowAdditional: values["allow-additional"],
     });
     console.log(`organization ${r.orgId} ready.\nSend this one-time link to ${values["admin-email"]} (valid 7 days):\n${r.inviteUrl}`);
   }

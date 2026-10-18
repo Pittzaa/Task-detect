@@ -1,4 +1,4 @@
-export type ErrorCode = "NOT_FOUND" | "FORBIDDEN" | "UNAUTHENTICATED" | "VALIDATION" | "CONFLICT" | "RATE_LIMITED" | "UNAVAILABLE";
+export type ErrorCode = "NOT_FOUND" | "FORBIDDEN" | "UNAUTHENTICATED" | "VALIDATION" | "CONFLICT" | "RATE_LIMITED" | "UNAVAILABLE" | "REGISTRATION_CLOSED";
 
 export class AppError extends Error {
   constructor(
@@ -24,3 +24,6 @@ export const conflict = (message: string) => new AppError("CONFLICT", message, 4
 export const rateLimited = () => new AppError("RATE_LIMITED", "Too many requests", 429);
 /** The service refuses to operate because a safety precondition is not met (for example a misconfigured database role). */
 export const unavailable = () => new AppError("UNAVAILABLE", "Service unavailable", 503);
+
+/** Nobody new may sign up or ask to join right now (an administrator switched registration off). */
+export const registrationClosed = () => new AppError("REGISTRATION_CLOSED", "Registration is closed", 403);

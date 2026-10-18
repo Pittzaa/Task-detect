@@ -3,4 +3,4 @@
  * it with the database, so a deployment that went out before `pnpm db:migrate` is reported instead of failing on first
  * use. A unit test keeps this number equal to the journal.
  */
-export const EXPECTED_MIGRATIONS = 14;
+export const EXPECTED_MIGRATIONS = 15;

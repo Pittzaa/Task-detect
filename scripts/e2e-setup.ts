@@ -41,8 +41,8 @@ export async function setupE2e(adminBase = process.env.E2E_DB_ADMIN_URL ?? "post
 
   const { db, close } = createDb(adminUrl);
   try {
-    const acme = await bootstrapOrganization(db, { name: "Acme Co", slug: "acme", adminEmail: "admin@e2e.test", appUrl: "http://localhost:3100" });
-    const globex = await bootstrapOrganization(db, { name: "Globex", slug: "globex", adminEmail: "boss@e2e.test", appUrl: "http://localhost:3100" });
+    const acme = await bootstrapOrganization(db, { name: "Acme Co", slug: "acme", adminEmail: "admin@e2e.test", appUrl: "http://localhost:3100", allowAdditional: true });
+    const globex = await bootstrapOrganization(db, { name: "Globex", slug: "globex", adminEmail: "boss@e2e.test", appUrl: "http://localhost:3100", allowAdditional: true });
     rmSync(STATE_DIR, { recursive: true, force: true });
     mkdirSync(STATE_DIR, { recursive: true });
     writeFileSync(`${STATE_DIR}/state.json`, JSON.stringify({ acme, globex, databaseUrl: appUrl.toString() }));

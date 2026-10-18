@@ -5,7 +5,7 @@
 
 > **อ่านก่อน: อะไรที่ตรวจสอบแล้ว และอะไรที่ยังไม่ได้ตรวจสอบ**
 >
-> * **รันจริงในเครื่องผู้พัฒนาแล้ว (Ubuntu 24.04, PostgreSQL 16, Node 22):** สร้าง role และฐานข้อมูลด้วยสิทธิ์ธรรมดา (ไม่ใช่ superuser), `pnpm db:migrate`, grants, `pnpm bootstrap`, `pnpm verify:database` (ผ่าน 13/13), `pnpm build`, `next start -H 127.0.0.1` ในโหมด production, อัปโหลด/ดาวน์โหลดไฟล์แนบลงโฟลเดอร์, สคริปต์ tick (ทั้งรหัสถูกและผิด), `scripts/backup.sh` พร้อมเข้ารหัสและถอดรหัสกลับ, `pnpm verify:attachments`
+> * **รันจริงในเครื่องผู้พัฒนาแล้ว (Ubuntu 24.04, PostgreSQL 16, Node 22):** สร้าง role และฐานข้อมูลด้วยสิทธิ์ธรรมดา (ไม่ใช่ superuser), `pnpm db:migrate`, grants, `pnpm bootstrap`, `pnpm verify:database` (ผ่าน 13/13 ตอนที่เขียนคู่มือนี้ ปัจจุบันมี 15 ข้อ — เพิ่มข้อตรวจสิทธิ์ของสวิตช์สมัครสมาชิก — ผ่านครบ 15/15 กับฐานทดสอบในเครื่อง), `pnpm build`, `next start -H 127.0.0.1` ในโหมด production, อัปโหลด/ดาวน์โหลดไฟล์แนบลงโฟลเดอร์, สคริปต์ tick (ทั้งรหัสถูกและผิด), `scripts/backup.sh` พร้อมเข้ารหัสและถอดรหัสกลับ, `pnpm verify:attachments`
 > * **ยังไม่ได้รันบน VPS จริง:** คำสั่ง `apt`, ไฟล์ systemd (ตรวจไวยากรณ์ด้วย `systemd-analyze verify` แล้วเท่านั้น), Caddy, ufw, การขอใบรับรอง HTTPS, Resend จริง ผมไม่มีเซิร์ฟเวอร์ให้ทดสอบ ข้อความที่มาจากความรู้ทั่วไปและไม่ได้ตรวจ ติดป้าย **(ตรวจสอบเอง)**
 > * ถ้าขั้นไหนไม่เป็นไปตามคู่มือ ส่งข้อความ error มาให้ผม ผมแก้คู่มือให้
 
@@ -180,11 +180,12 @@ sudo bash -c 'set -a; . /etc/task-tracker/owner.env; set +a; cd /opt/task-tracke
 sudo bash -c 'set -a; . /etc/task-tracker/owner.env; set +a; cd /opt/task-tracker/app && pnpm bootstrap --name "ชื่อองค์กรของคุณ" --slug acme --admin-email you@example.com --app-url https://tasks.example.com'
 #   → พิมพ์ลิงก์ https://tasks.example.com/invite?token=...   (เก็บไว้ ใช้ในขั้น 10)
 
-# 5.4 ตรวจว่าฐานข้อมูลถูกต้องในมุมมองของแอป (ต้องขึ้น DATABASE CHECK PASSED: 13/13)
+# 5.4 ตรวจว่าฐานข้อมูลถูกต้องในมุมมองของแอป (ต้องขึ้น DATABASE CHECK PASSED: 15/15)
 sudo -H -u tasktracker bash -c 'set -a; . /etc/task-tracker/env; set +a; cd /opt/task-tracker/app && pnpm -s verify:database'
 ```
 
-`--slug` คือรหัสองค์กรที่สมาชิกพิมพ์ในหน้า "ขอสิทธิ์เข้าใช้งาน"
+**หนึ่งระบบ = หนึ่งองค์กร** คำสั่ง `pnpm bootstrap` จะไม่ยอมสร้างองค์กรที่สอง (รันซ้ำด้วย `--slug` เดิมได้ ใช้ออกลิงก์เชิญใหม่ถ้าลิงก์หมดอายุ) **คนแรกที่รับคำเชิญคือผู้ดูแลสูงสุด (`orgadmin`)** ที่ทำได้ทุกอย่าง เปิด/ปิดการสมัครสมาชิกได้ที่ ตั้งค่า → ทั่วไป และลบแผนก ทีม โปรเจกต์ได้ที่หน้าโครงสร้างองค์กร (ผู้ดูแลคนอื่นที่เชิญเพิ่มมีสิทธิ์เท่ากันทุกอย่าง ไม่มี "เจ้าของ" ที่อยู่เหนือกว่า)
+`--slug` คือรหัสองค์กร ใช้พิมพ์ในหน้า "ขอสิทธิ์เข้าใช้งาน" เฉพาะเมื่อมีมากกว่าหนึ่งองค์กร (มีองค์กรเดียวหน้านั้นไม่ถามรหัส)
 
 ## ขั้นที่ 6: build
 

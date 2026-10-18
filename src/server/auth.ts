@@ -11,6 +11,7 @@ import { DEFAULT_LOCALE, isLocale, t, type Locale } from "@/i18n";
 import { describeError } from "@/lib/error-report";
 import { logger } from "@/lib/logger";
 import { auditAuthEvent } from "@/data/account";
+import { canRegister } from "./registration";
 
 export interface AuthDeps {
   db: Db;
@@ -137,6 +138,8 @@ export function createAuth(deps: AuthDeps) {
       user: {
         create: {
           before: async (user, ctx) => {
+            // The registration switch: once an administrator closes it, only an address with a pending invitation gets an account.
+            if (!(await canRegister(db, user.email))) throw new APIError("FORBIDDEN", { message: "Registration is closed", code: "REGISTRATION_CLOSED" });
             // A name chosen by a person is refused; one handed over by Google is cleaned instead, so that an unusual display
             // name there cannot make sign-in fail.
             if (ctx?.path?.startsWith("/callback")) return { data: { ...user, name: cleanProviderName(user.name, user.email) } };

@@ -8,8 +8,8 @@ Everything here was run on the release candidate; the exact results are in [READ
 pnpm lint                      # ESLint (React hooks rules included)
 pnpm typecheck                 # tsc --noEmit
 pnpm test:unit                 # 279 tests, no database
-TEST_DATABASE_URL=postgres://postgres@127.0.0.1:54329/tasktracker_test pnpm test:integration   # 449 tests
-pnpm test:e2e                  # builds, then 84 browser tests (Chromium) against a production build
+TEST_DATABASE_URL=postgres://postgres@127.0.0.1:54329/tasktracker_test pnpm test:integration   # 500 tests
+pnpm test:e2e                  # builds, then 92 browser tests (Chromium) against a production build
 pnpm test:e2e:browsers         # the same suite once per engine (chromium, firefox, webkit); the last two have never been run
 pnpm load                      # load test against a production build with seeded volume (see below)
 pnpm build                     # production build
@@ -51,6 +51,7 @@ Local PostgreSQL for the tests (no Docker needed): a PostgreSQL 16 cluster on po
 | Per-organization export/import | `org-transfer` (18, two real databases: round trip, `--replace` leaves other tenants untouched, all-or-nothing, tamper/schema/passphrase checks, users arrive without credentials and regain access through "forgot password", chunk ordering). Four deliberate breakages caught; also run by hand on the E2E data (38 tasks, 143 audit rows) with an identical round trip. |
 | Attachment file backup | `backup-attachments` (6, two filesystem stores: incremental, never copies a damaged source over a good copy, restore after total loss, `--verify`, never deletes). Three breakages caught. The Blob store itself is not exercised. |
 | Direct large uploads | `direct-upload` (14): token bound to one name/size/type/no overwrite (decoded and asserted), permission/tenant checks, server-side inspection of the stored object (type from bytes, 25 MB cap, empty, missing, idempotent, race on the 25-file cap), HTTP routes. Five breakages caught. **The browser → Vercel Blob request is not tested.** |
+| Registration switch, single organization, deleting structure | `registration` (23: who may change the switch, who may create an account while it is closed — invitations valid/expired/revoked/used, the front check and the user-creation hook separately, the shared allowance —, asking to join with and without a code, what the public config says), `structure-delete` (26: who may delete a department/team/project, what is cleaned up, neighbours and other organizations untouched), `owner-role` (second organization refused by bootstrap; the column grant and `org_update` policy as a plain owner), E2E `11` (switch in the browser, the closed sign-up and join pages, the invited address still registers, deletions with confirmation, no delete buttons for non-administrators) |
 | Markdown | unit `markdown` (67): formatting, "plain text stays plain", link rules, a 37-payload XSS corpus checked structurally, resource limits with timing (the test fails without the work budget), E2E `02` |
 
 ## Mutation checks run manually (a test that cannot fail proves nothing)
@@ -71,6 +72,9 @@ Local PostgreSQL for the tests (no Docker needed): a PostgreSQL 16 cluster on po
 | Change signals: ignore permissions; stop touching `updated_at` for labels; count everyone's notifications; skip the task access check on comments; leave the readable-project list out of the fingerprint | 2, 1, 1, 2 and 1 tests failed (the last one only after the test was rewritten: the first version passed the broken code) |
 | Notification rendering: show tasks of deleted projects | 1 test failed |
 | Signal hub: no retention across leave-and-return | 1 test failed |
+| Registration switch: skip the check in the user-creation hook; skip the check in front of the sign-up route; count revoked/used invitations; let `requestAccess` ignore the switch; drop the permission check on the setting; drop the shared hourly allowance; spend the allowance while open | 1, 1, 1, 1, 5, 1 and 1 tests failed |
+| Registration column grant: no grant; whole-table `UPDATE` grant; policy `USING (true)` | the same 1 test failed each time (`owner-role.test.ts`); `pnpm verify:database` also fails (14/15) when the grant is revoked |
+| Deleting structure: no permission check on a department; team delete without the department scope; keep a team's role assignments; leave a project's tasks undeleted | 13, 1, 2 and 1 tests failed |
 
 ## Bugs the test suites found while being written (all fixed)
 

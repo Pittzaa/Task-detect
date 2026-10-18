@@ -7,6 +7,7 @@ import { loadPrincipals, type TenantSession } from "./tenant";
 import { projectScope } from "./scope";
 
 const UI_FLAGS: Record<string, Permission> = {
+  manageSettings: "org.manage_settings",
   manageMembers: "org.manage_members",
   approveMembers: "org.approve_members",
   manageRoles: "org.manage_roles",
@@ -14,6 +15,7 @@ const UI_FLAGS: Record<string, Permission> = {
   manageCustomFields: "org.manage_custom_fields",
   readAuditLog: "org.read_audit_log",
   createProject: "project.create",
+  deleteProject: "project.delete",
   manageDepartments: "department.manage",
   manageTeams: "team.manage",
   manageLabels: "label.manage",

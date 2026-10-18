@@ -99,6 +99,13 @@
       "when": 1792294559489,
       "tag": "0013_task_updated_index",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792337699070,
+      "tag": "0014_registration_open",
+      "breakpoints": true
     }
   ]
 }

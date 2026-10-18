@@ -5,9 +5,10 @@ import type { Db, Tx } from "@/db/client";
 import {
   auditLogs, departments, invitations, memberships, organizations, projects, rolePermissions, roleAssignments, roles, teams, users,
 } from "@/db/schema";
-import { conflict, forbidden, notFound, validation } from "@/lib/errors";
+import { conflict, forbidden, notFound, registrationClosed, validation } from "@/lib/errors";
 import { randomToken, sha256Hex } from "@/lib/crypto";
 import { consumeRateLimit } from "@/server/rate-limit";
+import { soleOrganization } from "@/server/registration";
 import type { TenantSession } from "./tenant";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -37,25 +38,36 @@ export async function auditAuthEvent(db: Db, userId: string, action: string, met
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Creates a PENDING membership for the signed-in user in the organization with this code.
- * The response never reveals whether the code exists, so organization codes cannot be enumerated.
+ * Creates a PENDING membership for the signed-in user. Without a code it is for the only organization there is; with a code,
+ * for the organization that has it. An unknown code, or no code while there are several organizations, looks like success, so
+ * organization codes cannot be enumerated. An organization that closed registration refuses with REGISTRATION_CLOSED.
  */
-export async function requestAccess(db: Db, userId: string, orgSlug: string): Promise<{ status: "submitted" }> {
+export async function requestAccess(db: Db, userId: string, orgSlug?: string): Promise<{ status: "submitted" }> {
   await consumeRateLimit(db, `join:${userId}`, 3600, 5);
-  const slug = orgSlug.trim().toLowerCase();
-  if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)) return { status: "submitted" };
+  let target: { id: string; open: boolean } | null;
+  if (orgSlug === undefined) {
+    target = await soleOrganization(db);
+  } else {
+    const slug = orgSlug.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)) return { status: "submitted" };
+    target = await db.transaction(async (tx) => {
+      await setCtx(tx, { userId, orgSlug: slug });
+      const [org] = await tx.select({ id: organizations.id, open: organizations.registrationOpen }).from(organizations).where(and(eq(organizations.slug, slug), isNull(organizations.deletedAt)));
+      return org ?? null;
+    });
+  }
+  if (!target) return { status: "submitted" };
+  if (!target.open) throw registrationClosed();
+  const orgId = target.id;
   await db.transaction(async (tx) => {
-    await setCtx(tx, { userId, orgSlug: slug });
-    const [org] = await tx.select({ id: organizations.id }).from(organizations).where(and(eq(organizations.slug, slug), isNull(organizations.deletedAt)));
-    if (!org) return;
-    await setCtx(tx, { userId, orgId: org.id });
+    await setCtx(tx, { userId, orgId });
     const inserted = await tx
       .insert(memberships)
-      .values({ orgId: org.id, userId, status: "pending" })
+      .values({ orgId, userId, status: "pending" })
       .onConflictDoNothing()
       .returning({ id: memberships.id });
     if (inserted[0]) {
-      await tx.insert(auditLogs).values({ orgId: org.id, actorUserId: userId, action: "membership.requested", targetType: "membership", targetId: inserted[0].id });
+      await tx.insert(auditLogs).values({ orgId, actorUserId: userId, action: "membership.requested", targetType: "membership", targetId: inserted[0].id });
     }
   });
   return { status: "submitted" };

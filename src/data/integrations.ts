@@ -107,7 +107,7 @@ export async function rotateDestination(s: TenantSession, deps: SecretDeps, id: 
 }
 
 /** Stored in place of the encrypted webhook URL when a destination is deleted: the secret is gone immediately, not after the retention period. */
-const DESTROYED_SECRET = "destroyed";
+export const DESTROYED_SECRET = "destroyed";
 
 export async function deleteDestination(s: TenantSession, id: string) {
   s.require("org.manage_integrations");

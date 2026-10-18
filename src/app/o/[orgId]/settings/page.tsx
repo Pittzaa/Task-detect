@@ -8,7 +8,7 @@ import { useQuery } from "@/ui/hooks";
 import { useI18n } from "@/ui/i18n";
 import { useOrg } from "@/ui/org";
 
-type TabId = "notifications" | "integrations" | "fields" | "labels";
+type TabId = "notifications" | "integrations" | "fields" | "labels" | "general";
 
 function Settings() {
   const { can } = useOrg();
@@ -20,6 +20,7 @@ function Settings() {
     { id: "integrations", label: t("ui.integrations") },
     ...(can.manageCustomFields ? [{ id: "fields" as const, label: t("ui.fields_admin") }] : []),
     ...(can.manageLabels ? [{ id: "labels" as const, label: t("ui.labels") }] : []),
+    ...(can.manageSettings ? [{ id: "general" as const, label: t("ui.general_settings") }] : []),
   ];
   return (
     <div className="stack">
@@ -29,10 +30,40 @@ function Settings() {
       {tab === "integrations" && <Integrations />}
       {tab === "fields" && <CustomFieldsAdmin />}
       {tab === "labels" && <LabelsAdmin />}
+      {tab === "general" && can.manageSettings && <GeneralSettings />}
     </div>
   );
 }
 export default function Page() { return <Suspense><Settings /></Suspense>; }
+
+// ---------------------------------------------------------------------------------------------
+function GeneralSettings() {
+  const { orgId } = useOrg();
+  const { t, err } = useI18n();
+  const toast = useToast();
+  const q = useQuery<{ registrationOpen: boolean }>(`org-settings:${orgId}`, () => api(`/api/orgs/${orgId}/settings`));
+  // the switch answers at once: the chosen value is shown for as long as the server still reports the value it had before
+  const [chosen, setChosen] = useState<{ value: boolean; baseline: boolean }>();
+  async function setOpen(open: boolean) {
+    setChosen({ value: open, baseline: q.data!.registrationOpen });
+    try { await api(`/api/orgs/${orgId}/settings`, { method: "PUT", body: { registrationOpen: open } }); q.reload(); toast(t("ui.save")); }
+    catch (e) { setChosen(undefined); toast(err(e), "error"); }
+  }
+  if (q.loading && !q.data) return <Loading />;
+  if (q.error) return <ErrorNote error={q.error} onRetry={q.reload} />;
+  const open = chosen && q.data!.registrationOpen === chosen.baseline ? chosen.value : q.data!.registrationOpen;
+  return (
+    <section className="card stack" aria-labelledby="h-registration">
+      <h2 id="h-registration">{t("ui.registration_title")}</h2>
+      <label className="row" style={{ gap: "0.5rem" }}>
+        <input type="checkbox" role="switch" checked={open} onChange={(e) => void setOpen(e.target.checked)} />
+        <span>{t("ui.registration_open_label")}</span>
+        <span className="badge" data-state={open ? "open" : "closed"}>{open ? t("ui.registration_state_open") : t("ui.registration_state_closed")}</span>
+      </label>
+      <p className="muted">{open ? t("ui.registration_hint_open") : t("ui.registration_hint_closed")}</p>
+    </section>
+  );
+}
 
 // ---------------------------------------------------------------------------------------------
 interface SettingsView { settings: { channel: "in_app" | "email"; event: string; enabled: boolean; isDefault: boolean }[]; digest: "off" | "daily" | "weekly"; quietStart: string | null; quietEnd: string | null }

@@ -20,7 +20,8 @@ without using a retry), and safe to run concurrently or twice.
 | Expired sessions, verification tokens, OAuth states, rate-limit counters | 1 day after expiry | Deleted | — |
 | Orphaned files (in Blob, no database row) | 24 h grace | Deleted by the weekly sweep | — |
 | Users | Until the person erases their account (Security page → *Erase my account*) | The profile row stays as a **placeholder** (name “Deleted user”, address `erased-<id>@erased.invalid`) so the organization's records keep their references; everything personal is removed — see [Account erasure](#account-erasure) | The person, with their password |
-| Organizations, projects, teams, departments, roles | Not purged | Soft-delete/suspension only | An operator (no UI for deleting an organization) |
+| Organizations, roles | Not purged | Soft-delete/suspension only | An operator (no UI for deleting an organization) |
+| Departments, teams, projects (**soft-deleted** by an administrator) | Rows are kept (so history that mentions them still reads); not purged | — | A deleted **project** takes its tasks with it: they enter the task trash above and are erased after 30 days, and cannot be restored from the interface. Its recurring series stop, its Discord destinations are destroyed (secret erased at once), and team/department/project-scoped role assignments, the teams' project links and team-shared views are removed. See [ADMIN_GUIDE.md](ADMIN_GUIDE.md) §2. |
 
 “Kept for” means *at least*: the daily job removes data on its next run after the period ends. Pending (unprocessed) jobs and outbox events are **never** purged.
 

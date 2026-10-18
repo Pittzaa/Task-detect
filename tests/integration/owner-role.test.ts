@@ -84,6 +84,48 @@ describe("a plain (non-superuser, non-BYPASSRLS) database owner", () => {
     } finally { await close(); }
   });
 
+  it("one installation is one organization: a second one is refused unless the operator insists", async () => {
+    const { db, close } = createDb(withDb(OWNER, "owner", DB));
+    try {
+      await expect(bootstrapOrganization(db, { name: "Second", slug: "second-org", adminEmail: "other@example.test", appUrl: "https://tasks.example.test" })).rejects.toThrow(/already has an organization/);
+      expect((await sup.query(`select count(*)::int as n from organizations where slug = 'second-org'`)).rows[0].n).toBe(0);
+      const made = await bootstrapOrganization(db, { name: "Second", slug: "second-org", adminEmail: "other@example.test", appUrl: "https://tasks.example.test", allowAdditional: true });
+      expect(made.orgId).toBeTruthy();
+      expect((await sup.query(`select count(*)::int as n from organizations where slug = 'second-org'`)).rows[0].n).toBe(1);
+    } finally { await close(); }
+  });
+
+  it("the runtime role can change an organization's registration switch (its own, nothing else about it)", async () => {
+    const orgs = (await sup.query(`select id, slug from organizations where slug in ('acme-bootstrap', 'second-org') order by slug`)).rows as { id: string; slug: string }[];
+    const acme = orgs.find((o) => o.slug === "acme-bootstrap")!;
+    const second = orgs.find((o) => o.slug === "second-org")!;
+    const app = new pg.Client({ connectionString: withDb(APP, "app", DB) });
+    await app.connect();
+    const inOrg = async (orgId: string, sql: string) => {
+      await app.query("begin");
+      await app.query(`select set_config('app.org_id', $1, true)`, [orgId]);
+      try { return await app.query(sql); } finally { await app.query("rollback"); }
+    };
+    try {
+      // own organization, the one allowed column
+      expect((await inOrg(acme.id, `update organizations set registration_open = false where id = '${acme.id}'`)).rowCount).toBe(1);
+      // another organization's row is invisible to the policy
+      expect((await inOrg(acme.id, `update organizations set registration_open = false where id = '${second.id}'`)).rowCount).toBe(0);
+      // no organization context at all
+      expect((await inOrg("", `update organizations set registration_open = false where id = '${acme.id}'`)).rowCount).toBe(0);
+      // every other column stays out of reach
+      await expect(inOrg(acme.id, `update organizations set name = 'renamed' where id = '${acme.id}'`)).rejects.toThrow(/permission denied/);
+      await expect(inOrg(acme.id, `update organizations set slug = 'renamed' where id = '${acme.id}'`)).rejects.toThrow(/permission denied/);
+      await expect(inOrg(acme.id, `update organizations set deleted_at = now() where id = '${acme.id}'`)).rejects.toThrow(/permission denied/);
+      // and the worker flag does not widen it
+      await app.query("begin");
+      await app.query(`select set_config('app.worker', 'on', true)`);
+      const viaWorker = await app.query(`update organizations set registration_open = false where id = '${second.id}'`).then((r) => r.rowCount, () => -1);
+      await app.query("rollback");
+      expect(viaWorker).toBe(0);
+    } finally { await app.end(); }
+  });
+
   it("the runtime role cannot create organizations or alter system roles, even pretending to be the worker", async () => {
     const app = new pg.Client({ connectionString: withDb(APP, "app", DB) });
     await app.connect();

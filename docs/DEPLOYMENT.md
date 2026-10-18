@@ -56,7 +56,7 @@
    DATABASE_URL_UNPOOLED='<owner direct string>' pnpm bootstrap --name "Acme Co" --slug acme --admin-email admin@acme.example --app-url https://tasks.example.com
    ```
 
-   คำสั่งนี้พิมพ์ลิงก์ใช้ครั้งเดียว (อายุ 7 วัน) สำหรับผู้ดูแลคนแรก ส่วน `--slug` คือรหัสองค์กรที่สมาชิกพิมพ์ในหน้า “ขอเข้าร่วม”
+   คำสั่งนี้พิมพ์ลิงก์ใช้ครั้งเดียว (อายุ 7 วัน) สำหรับผู้ดูแลคนแรก ส่วน `--slug` คือรหัสองค์กรที่สมาชิกพิมพ์ในหน้า “ขอเข้าร่วม” (เมื่อมีองค์กรเดียวไม่ต้องพิมพ์) หนึ่งระบบมีได้หนึ่งองค์กร: bootstrap องค์กรที่สองจะถูกปฏิเสธ คนที่รับคำเชิญคือผู้ดูแลสูงสุด และปิด/เปิดการสมัครสมาชิกได้ที่ ตั้งค่า → ทั่วไป
 
 **ถ้าสร้าง Neon ผ่านปุ่ม Integration ใน Vercel (Marketplace):** ตอนติดตั้ง ปิด *Auth* และ *Realtime* (แอปไม่ใช้ทั้งสองอย่าง) เท่าที่ทราบ Vercel จะใส่ `DATABASE_URL` และ `DATABASE_URL_UNPOOLED`
 ที่เป็นของ **owner** ให้เองใน environment variables **(ตรวจสอบชื่อตัวแปรเองในหน้า Settings → Environment Variables)** ต้องแก้: ตั้ง `DATABASE_URL` เป็น string ของ `tt_app` และ **ลบ `DATABASE_URL_UNPOOLED` ออกจาก Vercel**

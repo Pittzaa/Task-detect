@@ -9,8 +9,11 @@ const SLUG = /^[a-z0-9][a-z0-9-]{1,62}$/;
 /**
  * Operator-only (runs with the owner/admin database role, never from a request): creates an
  * organization and an `orgadmin` invitation for its first administrator.
+ *
+ * One installation is one organization: a second, differently named organization is refused unless the operator says
+ * `allowAdditional` (used by the multi-tenant test fixtures). Running it again for the same code just issues a new invitation.
  */
-export async function bootstrapOrganization(db: Db, input: { name: string; slug: string; adminEmail: string; appUrl: string }) {
+export async function bootstrapOrganization(db: Db, input: { name: string; slug: string; adminEmail: string; appUrl: string; allowAdditional?: boolean }) {
   if (!SLUG.test(input.slug)) throw new Error("slug must be lowercase letters, digits and dashes (2-63 chars)");
   const adminEmail = input.adminEmail.trim().toLowerCase();
   const roleIds = await syncSystemRoles(db);
@@ -19,7 +22,13 @@ export async function bootstrapOrganization(db: Db, input: { name: string; slug:
     // satisfies the tenant policies of the invitation and audit rows.
     await tx.execute(sql`select set_config('app.worker', 'on', true), set_config('app.user_id', '', true), set_config('app.org_id', '', true)`);
     let [org] = await tx.select().from(organizations).where(eq(organizations.slug, input.slug));
-    if (!org) [org] = await tx.insert(organizations).values({ name: input.name, slug: input.slug }).returning();
+    if (!org) {
+      const others = await tx.select({ slug: organizations.slug }).from(organizations).where(isNull(organizations.deletedAt)).limit(1);
+      if (others[0] && !input.allowAdditional) {
+        throw new Error(`This installation already has an organization ("${others[0].slug}"). It is meant to hold exactly one; run this again with that code to issue a new invitation, or pass --allow-additional to really create another.`);
+      }
+      [org] = await tx.insert(organizations).values({ name: input.name, slug: input.slug }).returning();
+    }
     await tx.execute(sql`select set_config('app.org_id', ${org!.id}, true)`);
     const token = randomToken();
     await tx.insert(invitations).values({

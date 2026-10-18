@@ -10,20 +10,36 @@ For people with the **orgadmin** role (all permissions) and managers (a subset �
 2. The administrator **registers with exactly that e-mail address**, verifies it from the e-mail Resend sends, signs in, opens the link and presses **Accept invitation**. (Someone else cannot use the link; an expired or reused link is refused.)
 3. Add a second administrator as soon as possible (Members → Invitations) so the organization never depends on one person. The system refuses to remove, suspend or demote the **last** administrator.
 
-The `--slug` (the *organization code*) is what people type on **Request access** when they self-register. It is not a secret; approval is what protects the organization.
+**One installation is one organization.** `pnpm bootstrap` refuses to create a second, differently named organization (running it again with the same `--slug` only issues a fresh invitation). The *first administrator* is the person invited by that command; they hold `orgadmin`, the role with every permission. There is deliberately **no “owner” above `orgadmin`**: every administrator can do everything the first one can, including inviting, demoting (never the last one) and deleting structure. Keep that role for people you would trust with the whole workspace. (`--allow-additional` exists for test fixtures that need several organizations; do not use it in production.)
+
+The `--slug` (the *organization code*) is what people type on **Request access** when there is more than one organization. With exactly one, the **Request access** page does not ask for a code at all. It is not a secret; approval is what protects the organization.
+
+### Opening and closing registration (Settings → General)
+
+Administrators (`org.manage_settings`) have a switch, **Allow new people to sign up and ask to join**:
+
+* **On (the default):** anyone who knows the address of the site can create an account and press **Request access**; you still approve every request, and until you do they can reach nothing.
+* **Off:** nobody new can create an account or ask to join. The only exception is an e-mail address that holds a **valid, unused invitation** (so you can still invite someone with Members → Invitations while it is off). The sign-up page says so, the **Request access** page is disabled, and the server refuses the same requests if someone sends them directly. People who are already members, and anyone who already has an account, are not affected.
+
+Each change is written to the audit log (`org.registration_open` / `org.registration_close`). A side effect to know about: while the switch is off, the sign-up page can only tell “invited” from “not invited”, so someone who tries addresses one by one could learn which addresses have a pending invitation (limited to 10 sign-up attempts per hour per address of the caller).
 
 ## 2. Structure: departments, teams, projects (Structure)
 
 * **Departments** group teams; **teams** belong to one department; **projects** are the container for tasks.
 * A project can have **participating teams** (Structure → *Participating teams*). A person whose role is scoped to a team can see and work on the tasks of every project that team participates in.
 * Only administrators manage departments and teams; managers can create projects.
+* **Deleting (administrators only).** Each department, team and project has a **Delete** button on this page, after a confirmation that says what goes with it. Nothing is deleted without that confirmation, and the server checks the permission again.
+  * **A team:** the people who only had a role in that team lose that access (they stay members, with their other roles), the team leaves its projects, Discord channels and team-shared views of the team are removed. Projects and tasks are untouched.
+  * **A department:** the same, for the department and **all teams in it**. Projects and tasks are untouched.
+  * **A project:** the project **and all its tasks** are removed from every view straight away; its recurring tasks stop and its Discord channels are destroyed. The tasks are kept out of sight for 30 days and then erased for good ([RETENTION.md](RETENTION.md)); they **cannot be restored from the interface**, so treat this as final.
+  * The rows are only marked as deleted (so history that mentions them still reads), and each deletion is in the audit log (`team.delete`, `department.delete`, `project.delete`). There is no “undo”; to bring a structure back, create it again.
 
 ## 3. People (Members)
 
 **Joining**
 
 * **By invitation** (Members → Invitations): enter an e-mail address and a role. The person registers with that address and accepts the link.
-* **By request:** a person registers, opens **Request access**, enters the organization code, and waits. The same message is shown whether or not the code exists. They appear under **Waiting for approval**: pick a role and press **Approve** (or leave them pending). Until approval they can reach **nothing** in the organization; the server answers “not found”.
+* **By request** (only while registration is on, see above): a person registers, opens **Request access** (entering the organization code only if there is more than one organization), and waits. The same message is shown whether or not the code exists. They appear under **Waiting for approval**: pick a role and press **Approve** (or leave them pending). Until approval they can reach **nothing** in the organization; the server answers “not found”.
 
 **Roles and scopes**
 
@@ -88,6 +104,8 @@ Audit log (administrators): who did what and when — sign-ins, role and members
 | Nobody receives e-mail | Resend domain not verified / `RESEND_API_KEY` wrong / cron not running (Job health shows pending `notification.email`). |
 | Notifications arrive late | Cron cadence is slower than every minute (plan limit) — see [DEPLOYMENT.md](DEPLOYMENT.md) §0. |
 | “Request access” always says sent but nothing appears | The organization code is wrong (by design the answer is identical); or the person has not verified their e-mail. |
+| “New sign-ups are closed at the moment” | An administrator switched registration off (Settings → General). Invite the person (Members → Invitations) or switch it back on. |
+| `pnpm bootstrap` says the installation already has an organization | By design (one installation, one organization). Use the existing `--slug` to issue a new invitation for the same organization. |
 | A person sees an empty workspace | Approved but no role assignment — assign one. |
 | A task “disappeared” | Deleted within 30 days: undo/restore it; otherwise it was purged. |
 | Calendar connection shows an error | The Google grant was revoked or expired — reconnect. |

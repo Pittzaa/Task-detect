@@ -44,7 +44,7 @@ export function I18nProvider({ children, initialLocale = "th", timezone: initial
       if (e.message.startsWith("val.") && e.message in allMessages[locale]) {
         return translate(locale, e.message as MessageKey, { from: String(e.data?.from ?? ""), to: String(e.data?.to ?? "") });
       }
-      const map: Record<string, MessageKey> = { NOT_FOUND: "error.not_found", FORBIDDEN: "error.forbidden", UNAUTHENTICATED: "error.unauthenticated", RATE_LIMITED: "error.rate_limited", VALIDATION: "error.validation", CONFLICT: "error.conflict" };
+      const map: Record<string, MessageKey> = { NOT_FOUND: "error.not_found", FORBIDDEN: "error.forbidden", UNAUTHENTICATED: "error.unauthenticated", RATE_LIMITED: "error.rate_limited", VALIDATION: "error.validation", CONFLICT: "error.conflict", REGISTRATION_CLOSED: "error.registration_closed" };
       if (e.code === "VALIDATION" && e.message && !e.message.startsWith("val.") && e.message !== "Invalid input") return e.message;
       if (e.code === "CONFLICT" && e.message) return e.message;
       return map[e.code] ? translate(locale, map[e.code]!) : translate(locale, "error.generic");

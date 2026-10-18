@@ -15,6 +15,13 @@
 5. **Union only, deny by default** — there are no explicit denies. No matching assignment → denied.
 6. The scope chain of a resource (its department/team/project ids) is always loaded from the database, never taken from the request.
 
+**`orgadmin` is the top role and there is nothing above it.** The first administrator of an installation is whoever `pnpm bootstrap` invited; they hold `orgadmin` like any administrator they later add (there is no separate “owner”: [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md)). Permissions that only `orgadmin` has, and where they are used:
+
+* `org.manage_settings` — the organization switches; today that is the registration switch (`PUT /api/orgs/:id/settings`, Settings → General).
+* `department.manage` — create **and delete** departments (organization-wide only; a department-scoped administrator cannot delete their own department).
+* `team.manage` — create and delete teams. Checked against the team’s department, so an administrator scoped to a department can delete the teams in it; one scoped to a single team cannot delete that team.
+* `project.delete` — delete a project and its tasks (checked against the project’s scope).
+
 Safeguards in the services: no privilege escalation (`assertCanGrantRole`: you can only grant roles whose permissions you hold at that scope), last-administrator protection (advisory lock), no self-suspension, custom roles may only contain catalog permissions, and **unreadable resources return 404 rather than 403** so existence is not disclosed.
 What the UI shows is a *hint* (`/api/orgs/:id/context` returns capability flags; `createTask`/`manageSeries` mean “somewhere in the org”); the server decides every action.
 
@@ -62,4 +69,4 @@ What the UI shows is a *hint* (`/api/orgs/:id/context` returns capability flags;
 Intent: **viewer** reads; **member** also creates/edits tasks in scope, changes status, comments and attaches files; **manager** also assigns and deletes tasks, manages dependencies, creates and edits projects, manages team members, reopens finished tasks, manages labels and recurring series, shares team views; **orgadmin** holds everything, including member approval, roles, integrations, custom fields, the audit log, structure administration and organization-wide views.
 
 ## Verified by
-Unit: `evaluate.test.ts`, `permissions.test.ts`, `docs.test.ts` (this table equals the code). Integration: `rbac.test.ts`, `tenant-isolation.test.ts`, `account.test.ts` (grant/escalation/last-admin), `tasks.test.ts`, `productivity.test.ts` (bulk per-record authorization), `context.test.ts`. Browser: `02-task-lifecycle` (viewer cannot edit; direct API refused), `07-recurring`.
+Unit: `evaluate.test.ts`, `permissions.test.ts`, `docs.test.ts` (this table equals the code). Integration: `rbac.test.ts`, `structure-delete.test.ts` (who may delete structure, what is cleaned up, other organizations untouched), `registration.test.ts` (who may change the registration switch), `tenant-isolation.test.ts`, `account.test.ts` (grant/escalation/last-admin), `tasks.test.ts`, `productivity.test.ts` (bulk per-record authorization), `context.test.ts`. Browser: `02-task-lifecycle` (viewer cannot edit; direct API refused), `07-recurring`.

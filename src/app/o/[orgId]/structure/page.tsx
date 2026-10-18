@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { RETENTION } from "@/domain/retention";
 import { api } from "@/ui/api";
 import { Btn, Empty, ErrorNote, Field, Loading, Modal, useToast } from "@/ui/components";
 import { useQuery } from "@/ui/hooks";
@@ -34,6 +35,11 @@ export default function StructurePage() {
   const [selected, setSelected] = useState<string[]>([]);
 
   async function guard(fn: () => Promise<unknown>) { try { await fn(); depts.reload(); teams.reload(); projects.reload(); } catch (e) { toast(err(e), "error"); } }
+  /** Deleting is one confirmed request; the server does the cleaning up (see deleteDepartment, deleteTeam, deleteProject). */
+  async function remove(path: string, question: string) {
+    if (!window.confirm(question)) return;
+    await guard(async () => { await api(path, { method: "DELETE" }); toast(t("ui.deleted_ok")); });
+  }
   async function openProject(p: Proj) {
     try { const d = await api<{ teamIds: string[] }>(`/api/orgs/${orgId}/projects/${p.id}`); setSelected(d.teamIds); setEditProject(p); } catch (e) { toast(err(e), "error"); }
   }
@@ -45,13 +51,17 @@ export default function StructurePage() {
       <h1>{t("ui.structure")}</h1>
       <section className="card" aria-labelledby="h-d">
         <h2 id="h-d">{t("ui.departments")}</h2>
-        <ul>{depts.data?.departments.map((d) => <li key={d.id}>{d.name}</li>)}</ul>
+        <ul>{depts.data?.departments.map((d) => (
+          <li key={d.id}>{d.name} {can.manageDepartments && <Btn small kind="danger" aria-label={`${t("ui.delete")}: ${d.name}`} onClick={() => void remove(`/api/orgs/${orgId}/departments/${d.id}`, t("ui.confirm_delete_department", { name: d.name, teams: teams.data?.teams.filter((x) => x.departmentId === d.id).length ?? 0 }))}>{t("ui.delete")}</Btn>}</li>
+        ))}</ul>
         {!depts.data?.departments.length && <Empty />}
         {can.manageDepartments && <AddForm label={t("ui.new_department")} onAdd={(name) => guard(() => api(`/api/orgs/${orgId}/departments`, { method: "POST", body: { name } }))} />}
       </section>
       <section className="card" aria-labelledby="h-t">
         <h2 id="h-t">{t("ui.teams")}</h2>
-        <ul>{teams.data?.teams.map((x) => <li key={x.id}>{x.name} <span className="muted small">· {depts.data?.departments.find((d) => d.id === x.departmentId)?.name}</span></li>)}</ul>
+        <ul>{teams.data?.teams.map((x) => (
+          <li key={x.id}>{x.name} <span className="muted small">· {depts.data?.departments.find((d) => d.id === x.departmentId)?.name}</span> {can.manageTeams && <Btn small kind="danger" aria-label={`${t("ui.delete")}: ${x.name}`} onClick={() => void remove(`/api/orgs/${orgId}/teams/${x.id}`, t("ui.confirm_delete_team", { name: x.name }))}>{t("ui.delete")}</Btn>}</li>
+        ))}</ul>
         {!teams.data?.teams.length && <Empty />}
         {can.manageTeams && (
           <AddForm label={t("ui.new_team")} onAdd={(name) => guard(() => api(`/api/orgs/${orgId}/teams`, { method: "POST", body: { name, departmentId: deptForTeam || depts.data?.departments[0]?.id } }))}
@@ -60,7 +70,9 @@ export default function StructurePage() {
       </section>
       <section className="card" aria-labelledby="h-p">
         <h2 id="h-p">{t("ui.projects")}</h2>
-        <ul>{projects.data?.projects.map((p) => <li key={p.id}>{p.name} {can.createProject && <Btn small onClick={() => void openProject(p)}>{t("ui.project_teams")}</Btn>}</li>)}</ul>
+        <ul>{projects.data?.projects.map((p) => (
+          <li key={p.id}>{p.name} {can.createProject && <Btn small onClick={() => void openProject(p)}>{t("ui.project_teams")}</Btn>} {can.deleteProject && <Btn small kind="danger" aria-label={`${t("ui.delete")}: ${p.name}`} onClick={() => void remove(`/api/orgs/${orgId}/projects/${p.id}`, t("ui.confirm_delete_project", { name: p.name, days: RETENTION.trashDays }))}>{t("ui.delete")}</Btn>}</li>
+        ))}</ul>
         {!projects.data?.projects.length && <Empty />}
         {can.createProject && <AddForm label={t("ui.new_project")} onAdd={(name) => guard(() => api(`/api/orgs/${orgId}/projects`, { method: "POST", body: { name } }))} />}
       </section>

@@ -33,6 +33,8 @@ export const organizations = pgTable("organizations", {
   id: id(),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
+  // false: nobody new can sign up or ask to join (people with a pending invitation still can). Changed by organization administrators.
+  registrationOpen: boolean("registration_open").notNull().default(true),
   createdAt: createdAt(),
   deletedAt: deletedAt(),
 });
