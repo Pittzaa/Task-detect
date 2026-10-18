@@ -1,5 +1,7 @@
 # Deployment (Vercel + Neon + Resend)
 
+> คู่มือภาษาไทยแบบทีละขั้น: [DEPLOYMENT_TH.md](DEPLOYMENT_TH.md)
+
 > **Read first — what has and has not been verified.**
 > Everything below the *database* line was exercised against a local PostgreSQL 16 and a local production build.
 > **No real Vercel, Neon, Resend, Google or Vercel Blob account was available to the author**, so those integrations

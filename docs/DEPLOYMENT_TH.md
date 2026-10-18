@@ -1,0 +1,291 @@
+# คู่มือการ deploy (ภาษาไทย): Vercel + Neon + Resend
+
+คู่มือนี้เป็นลำดับขั้นสำหรับคนที่จะนำระบบขึ้นใช้งานจริงเป็นครั้งแรก ทำตามจากบนลงล่างโดยไม่ข้ามขั้น
+รายละเอียดเชิงลึกและเหตุผลอยู่ในฉบับภาษาอังกฤษ [DEPLOYMENT.md](DEPLOYMENT.md), ตัวแปรทั้งหมดอยู่ใน [ENVIRONMENT.md](ENVIRONMENT.md), เรื่อง backup อยู่ใน [BACKUP_RESTORE.md](BACKUP_RESTORE.md)
+
+> **อ่านก่อน: อะไรที่ตรวจสอบแล้ว และอะไรที่ยังไม่ได้ตรวจสอบ**
+>
+> * โค้ด, ฐานข้อมูล (PostgreSQL 16), การทดสอบ, สคริปต์ migrate/bootstrap/verify/smoke ทั้งหมดรันผ่านบนเครื่องผู้พัฒนา กับ production build ในเครื่อง
+> * **ยังไม่เคย deploy ขึ้น Vercel, Neon, Resend, Google, Discord หรือ Vercel Blob จริงเลย** ผู้พัฒนาไม่มีบัญชีของบริการเหล่านี้ และเปิดเว็บ vercel.com / neon.com จากเครื่องที่ใช้พัฒนาไม่ได้
+> * ข้อความใดที่อธิบายหน้าจอ แผนราคา หรือข้อจำกัดของผู้ให้บริการ เขียนจากความรู้ทั่วไป และมีป้าย **(ตรวจสอบเอง)** กำกับ ชื่อเมนูอาจต่างจากที่เขียน ให้ยึดสิ่งที่เห็นบนหน้าจอจริง
+> * เพราะเหตุนี้ขั้นที่ 9 จึงมีสคริปต์ให้ **พิสูจน์ด้วยตัวเอง** บนบริการจริงภายในไม่กี่นาที อย่าข้ามขั้นนั้น
+
+---
+
+## ขั้นที่ 0: ภาพรวมและสิ่งที่ต้องเตรียม
+
+ลำดับการทำงาน
+
+```
+เตรียมความลับ → Neon (ฐานข้อมูล) → migrate + grants + bootstrap → Resend (อีเมล) → Vercel Blob (ไฟล์แนบ)
+   → Vercel (ตั้งค่า env, โดเมน, deploy) → ตรวจสอบด้วยสคริปต์ + ตรวจมือ → ตั้ง backup + monitoring → เปิดใช้งาน
+```
+
+ต้องมี
+
+| สิ่งที่ต้องมี | หมายเหตุ |
+|---|---|
+| บัญชี GitHub ที่มี repository นี้ | Vercel ดึงโค้ดจากที่นี่ |
+| บัญชี Vercel, Neon, Resend | แผน (plan) ที่เลือกมีผลต่อ cron และ backup ดูขั้นที่ 1 |
+| โดเมนที่คุณควบคุม DNS ได้ | ใช้ทั้งเป็น `APP_URL` และเป็นโดเมนส่งอีเมลของ Resend |
+| เครื่องสำหรับรันคำสั่งครั้งเดียว | Node.js **22 ขึ้นไป**, pnpm **10**, และ `psql` (หรือใช้ SQL editor ของ Neon แทน `psql` ได้) ใช้ Linux/macOS หรือ WSL / Git Bash บน Windows |
+| ที่เก็บรหัสผ่านที่ปลอดภัย | password manager สำหรับเก็บความลับทุกตัวด้านล่าง |
+
+เตรียมเครื่อง
+
+```bash
+git clone <repository ของคุณ> task-tracker && cd task-tracker
+corepack enable                       # ให้ได้ pnpm เวอร์ชันที่ repo กำหนด (หรือ npm i -g pnpm@10)
+pnpm install --frozen-lockfile
+```
+
+## ขั้นที่ 1: ตรวจแผนและข้อจำกัดก่อนซื้อหรือเลือกแผน **(ตรวจสอบเอง ทุกข้อ)**
+
+ระบบออกแบบโดยสมมติสิ่งต่อไปนี้ ตรวจกับแผนที่คุณจะใช้จริงก่อนเริ่ม
+
+| หัวข้อ | ระบบสมมติว่า | ถ้าไม่เป็นอย่างนั้น |
+|---|---|---|
+| **Vercel Cron ทุกนาที** | `vercel.json` ตั้งให้เรียก `/api/cron/tick` ทุก 1 นาที มีรายงานว่าแผน Hobby จำกัดวันละครั้ง ส่วน Pro ทุกนาทีได้ | ใช้ตัวตั้งเวลาภายนอกเรียก `GET /api/cron/tick` ทุก 1–5 นาที (ดูขั้นที่ 7.4) งานเบื้องหลังเก็บในฐานข้อมูล จึงไม่หาย แค่ช้าลง |
+| **ขนาดไฟล์ที่ส่งผ่าน function** | ไฟล์ ≤ 4 MB ผ่าน server ส่วน 4–25 MB อัปโหลดตรงจากเบราว์เซอร์เข้า Blob | ถ้าอัปโหลดตรงใช้ไม่ได้ ตั้ง `DIRECT_UPLOADS=off` (เหลือ 4 MB) |
+| **ระยะเวลา function** | route cron ประกาศ `maxDuration = 60` วินาที | แผนที่จำกัดสั้นกว่านั้นจะตัดงานกลางทาง (งานจะถูกลองใหม่เอง) |
+| **Neon: ช่วงเวลา point-in-time restore** | ขึ้นกับแผน | จดตัวเลขไว้ใน [BACKUP_RESTORE.md](BACKUP_RESTORE.md) §2.1 |
+| **Resend: โควตาส่งต่อวัน** | ขึ้นกับแผน | ดูว่าพอกับจำนวนผู้ใช้และการแจ้งเตือนของคุณ |
+
+## ขั้นที่ 2: สร้างความลับ
+
+รันบนเครื่องของคุณ แล้วเก็บผลทั้งสามไว้ใน password manager **แยกจากที่เก็บ deployment** (อย่าเก็บไว้ที่ Vercel ที่เดียว)
+
+```bash
+openssl rand -base64 48    # → BETTER_AUTH_SECRET  (เปลี่ยนแล้วทุกคนถูก sign out)
+openssl rand -base64 32    # → APP_ENCRYPTION_KEY  (หายแล้ว webhook Discord และโทเค็น Google Calendar ที่เก็บไว้ถอดรหัสไม่ได้)
+openssl rand -hex 24       # → CRON_SECRET         (ป้องกัน /api/cron/tick และ /api/health/ready)
+```
+
+ห้ามส่งความลับเหล่านี้ทางแชท อีเมล หรือ commit ลง git
+
+## ขั้นที่ 3: Neon (ฐานข้อมูล)
+
+### 3.1 สร้างโปรเจกต์
+
+1. สร้าง project ใน region ที่ **ใกล้ region ของ function บน Vercel** (ทุก query ต้องจ่ายค่า latency) **(ตรวจสอบเอง: เมนูเลือก region ของ Vercel อยู่ใน Project → Settings → Functions)**
+2. หา connection string 2 แบบ จากหน้า Connection Details ของ Neon
+   * **Pooled** (host มักมีคำว่า `-pooler`) → ใช้เป็น `DATABASE_URL` บน Vercel
+   * **Direct** (ไม่มี `-pooler`) → ใช้บนเครื่องคุณเพื่อ migrate/bootstrap/backup เท่านั้น เรียกในคู่มือนี้ว่า `OWNER_DIRECT`
+3. role เริ่มต้นของโปรเจกต์คือ **owner** ใช้เฉพาะงาน migrate, bootstrap และ backup **ห้ามนำไปใส่ใน Vercel**
+
+> หมายเหตุทางเทคนิค: ระบบเลือกไดรเวอร์ WebSocket ของ Neon เมื่อ host ใน `DATABASE_URL` มี `.neon.tech` ให้ใช้ connection string ที่ Neon ให้มาตรง ๆ อย่าเปลี่ยน host
+
+### 3.2 สร้าง role สำหรับแอป (สำคัญที่สุดเรื่องความปลอดภัย)
+
+เปิด SQL Editor ของ Neon (หรือ `psql "$OWNER_DIRECT"`) แล้วรันในฐานะ owner
+
+```sql
+CREATE ROLE tt_app LOGIN PASSWORD '<รหัสผ่านสุ่มยาว ๆ>' NOSUPERUSER NOBYPASSRLS;
+```
+
+เหตุผล: การแยกข้อมูลระหว่างองค์กรอาศัย row-level security ซึ่งไม่มีผลกับ role ที่ข้ามมันได้ ถ้าแอปเชื่อมต่อด้วย role แบบนั้น ระบบจะ **ปฏิเสธให้บริการ (HTTP 503)** เอง
+
+จากนั้นประกอบ connection string ของแอป: ใช้ **pooled string** เดิม แต่เปลี่ยน username/password เป็นของ `tt_app`
+
+```
+DATABASE_URL = postgres://tt_app:<รหัสผ่าน>@<host-pooler>/<ชื่อฐานข้อมูล>?sslmode=require
+```
+
+(รูปแบบพารามิเตอร์ท้าย URL ให้คัดลอกตามที่ Neon ให้มา)
+
+### 3.3 สร้างตารางและสิทธิ์
+
+รันบนเครื่องของคุณ ที่โฟลเดอร์ของโปรเจกต์
+
+```bash
+# 1) สร้างตาราง (migration) ด้วย owner + direct string
+DATABASE_URL_UNPOOLED='<OWNER_DIRECT>' pnpm db:migrate
+
+# 2) ให้สิทธิ์ role ของแอป
+psql '<OWNER_DIRECT>' -v ON_ERROR_STOP=1 -c "$(sed 's/{{APP_ROLE}}/tt_app/g' scripts/grants.sql)"
+```
+
+ไม่มี `psql` หรือใช้ Windows ล้วน ๆ: เปิดไฟล์ `scripts/grants.sql` แก้ `{{APP_ROLE}}` ทุกจุดเป็น `tt_app` แล้ววางทั้งไฟล์ใน SQL Editor ของ Neon รัน
+
+**กฎสำคัญ:** ทุกครั้งที่ปล่อยเวอร์ชันใหม่ที่มี migration ต้องรัน **migrate → grants → deploy** ตามลำดับนี้เสมอ (migration ไม่ได้ให้สิทธิ์กับ role ของแอปเอง)
+
+### 3.4 สร้างองค์กรแรกและผู้ดูแลคนแรก
+
+```bash
+DATABASE_URL_UNPOOLED='<OWNER_DIRECT>' pnpm bootstrap \
+  --name "ชื่อองค์กร" --slug acme \
+  --admin-email admin@yourcompany.example \
+  --app-url https://tasks.yourcompany.example
+```
+
+* คำสั่งพิมพ์ **ลิงก์เชิญครั้งเดียว** (อายุ 7 วัน) ผูกกับอีเมลนั้น ส่งให้ผู้ดูแลทางช่องทางส่วนตัว
+* `--slug` คือ "รหัสองค์กร" ที่สมาชิกพิมพ์ในหน้าขอเข้าร่วม ไม่ใช่ความลับ
+* ลิงก์หมดอายุ? รันคำสั่งเดิมซ้ำ (slug เดิม) จะได้ลิงก์ใหม่ โดยไม่สร้างองค์กรซ้ำ
+* ใช้ `--app-url` ให้ตรงกับโดเมนจริงที่จะใช้ในขั้นที่ 7.3
+
+## ขั้นที่ 4: Resend (อีเมล)
+
+ระบบใช้อีเมลสำหรับยืนยันการสมัคร คำเชิญ รีเซ็ตรหัสผ่าน การแจ้งเตือน และสรุปรายวัน/สัปดาห์
+
+1. เพิ่มโดเมนส่งอีเมลใน Resend แล้วเพิ่มระเบียน DNS (SPF/DKIM) ที่ Resend แสดงให้ในผู้ให้บริการ DNS ของคุณ รอจนสถานะเป็น **Verified**
+2. สร้าง API key แบบมีสิทธิ์ **ส่ง (sending)**
+3. จดค่า `RESEND_API_KEY` และกำหนด `EMAIL_FROM` เป็นที่อยู่บนโดเมนที่ verify แล้ว เช่น `Task Tracker <no-reply@yourcompany.example>`
+
+## ขั้นที่ 5: Vercel Blob (ไฟล์แนบ)
+
+1. สร้าง Blob store แบบ **private** ใน Vercel **(ตรวจสอบเอง: ชื่อเมนู Storage / Blob)**
+2. ผูกกับโปรเจกต์ (หรือคัดลอกโทเค็น) แล้วจดค่า `BLOB_READ_WRITE_TOKEN`
+3. ไม่มีโทเค็นนี้ = ระบบปฏิเสธการอัปโหลดใน production (จะไม่แอบเขียนลงดิสก์ชั่วคราว)
+
+> ส่วนที่ **ยังไม่เคยรันกับ Blob จริง**: การเขียน/อ่าน Blob และการอัปโหลดไฟล์ 4–25 MB ตรงจากเบราว์เซอร์ จะพิสูจน์ในขั้นที่ 9
+
+## ขั้นที่ 6: Google และ Discord (ไม่บังคับ)
+
+ข้ามได้ ถ้าไม่ตั้ง ปุ่มและฟีเจอร์เหล่านั้นจะซ่อนเอง (ตั้งเป็นคู่เท่านั้น: มี ID ต้องมี SECRET)
+
+* **เข้าสู่ระบบด้วย Google** (`GOOGLE_CLIENT_ID/SECRET`): redirect URI = `https://<โดเมนของคุณ>/api/auth/callback/google`
+* **ซิงก์ Google Calendar แบบทางเดียว** (`GOOGLE_CALENDAR_CLIENT_ID/SECRET`): เปิด Google Calendar API, scope `https://www.googleapis.com/auth/calendar.events`, redirect URI = `https://<โดเมนของคุณ>/api/calendar/callback` Google อาจกำหนดให้ยืนยัน OAuth consent screen ก่อนผู้ใช้ภายนอกจะอนุญาตได้ **(ตรวจสอบเอง)**
+* **Discord**: ผู้ดูแลองค์กรเพิ่ม webhook เองในหน้า Settings ไม่ต้องตั้งตัวแปรใดเพิ่ม
+* **รายงาน error (Sentry หรือที่เข้ากันได้)**: ตั้ง `SENTRY_DSN` (ต้องเป็น `https://`) จะส่งรายงานที่ตัดข้อมูลผู้ใช้แล้ว ยังไม่เคยลองกับ Sentry จริง
+
+## ขั้นที่ 7: Vercel (โฮสติ้ง)
+
+### 7.1 นำเข้าโปรเจกต์
+
+1. Add New → Project → เลือก repository
+2. Framework Preset: **Next.js** Install Command: `pnpm install` Build Command: `pnpm build` (ค่าเริ่มต้น) ไม่ต้องใส่ migration ใน build
+3. Node.js version ให้เป็น 22.x **(ตรวจสอบเอง: Settings → General)**
+4. **ไม่ต้องใช้ตัวแปรสภาพแวดล้อมตอน build** (ทดสอบแล้วว่า `pnpm build` ผ่านโดยไม่ตั้งตัวแปรใด) ตัวแปรใช้ตอนรันเท่านั้น
+
+### 7.2 ตั้งค่าตัวแปร (Settings → Environment Variables → **Production**)
+
+| ตัวแปร | ค่า | บังคับ |
+|---|---|---|
+| `APP_URL` | `https://tasks.yourcompany.example` (ไม่มี `/` ท้าย ต้อง https) | ใช่ |
+| `DATABASE_URL` | pooled string ของ role `tt_app` (ขั้นที่ 3.2) | ใช่ |
+| `BETTER_AUTH_SECRET` | จากขั้นที่ 2 | ใช่ |
+| `APP_ENCRYPTION_KEY` | จากขั้นที่ 2 | ใช่ |
+| `CRON_SECRET` | จากขั้นที่ 2 (Vercel Cron จะส่งเป็น `Authorization: Bearer …` ให้เองเมื่อมีตัวแปรนี้ **(ตรวจสอบเอง)**) | ใช่ |
+| `RESEND_API_KEY` | จากขั้นที่ 4 | ใช่ |
+| `EMAIL_FROM` | จากขั้นที่ 4 | ใช่ |
+| `BLOB_READ_WRITE_TOKEN` | จากขั้นที่ 5 | ใช่ (ถ้าต้องการไฟล์แนบ) |
+| `GOOGLE_*`, `SENTRY_DSN` | จากขั้นที่ 6 | ไม่ |
+| `DIRECT_UPLOADS` | `off` เพื่อปิดการอัปโหลดตรง 4–25 MB | ไม่ |
+| `LOG_LEVEL` | `info` (ค่าเริ่มต้น) | ไม่ |
+
+**ห้ามตั้งบน Vercel:** `DATABASE_URL_UNPOOLED` (เป็นของ owner), `APP_ENV`, `EMAIL_SINK_FILE` ถ้าไม่ตั้ง `APP_ENV` ระบบจะใช้กฎเข้มงวดสุดของ production เอง ถ้าตั้ง `EMAIL_SINK_FILE` ใน production ระบบจะปฏิเสธค่าตั้งนั้น
+
+ตั้งความลับเป็น *Sensitive* ถ้ามีตัวเลือก ถ้าตัวแปรผิดหรือขาด คำขอที่ต้องใช้ค่านั้นจะล้มเหลว (ตัวแปรถูกตรวจตอนใช้งานครั้งแรก ไม่ใช่ตอน build) และ log จะบอกชื่อตัวแปรที่มีปัญหา โดยไม่พิมพ์ค่า
+
+### 7.3 โดเมน
+
+1. เพิ่มโดเมนใน Project → Settings → Domains แล้วทำตาม DNS ที่ Vercel แจ้ง **(ตรวจสอบเอง)**
+2. `APP_URL` ต้องตรงกับโดเมนที่ผู้ใช้เข้าจริง **ทุกตัวอักษร** (รวม `www.` หรือไม่มี) เพราะระบบใช้ค่านี้ตรวจ Origin ของคำขอเขียนข้อมูล (ป้องกัน CSRF), ทำลิงก์ในอีเมล และ redirect ของ OAuth ถ้าไม่ตรง ผู้ใช้จะกดอะไรไม่ได้ (ได้ 403)
+3. ตั้ง `APP_URL` **ก่อน deploy ครั้งแรก**
+
+### 7.4 Cron (ตัวขับงานเบื้องหลัง)
+
+`vercel.json` ลงทะเบียน cron `GET /api/cron/tick` ทุกนาทีไว้แล้ว งานเบื้องหลังทั้งหมด (อีเมล แจ้งเตือน เตือนใกล้กำหนด Discord ซิงก์ปฏิทิน งานซ้ำ ล้างข้อมูลตามนโยบาย) เดินผ่านจุดนี้
+
+ถ้าแผนของคุณไม่รองรับทุกนาที:
+
+* ปรับ `schedule` ใน `vercel.json` ให้ตรงกับที่แผนอนุญาต หรือ
+* ใช้ตัวตั้งเวลาภายนอกเรียกทุก 1–5 นาที:
+
+```bash
+curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://tasks.yourcompany.example/api/cron/tick
+```
+
+ช้าลง = การแจ้งเตือนช้าลง แต่ไม่มีงานหาย
+
+### 7.5 Deploy ครั้งแรก
+
+กด Deploy แล้วรอจนสำเร็จ เปิด `https://<โดเมน>/login` ควรเห็นหน้าเข้าสู่ระบบ (ภาษาไทยเป็นค่าเริ่มต้น) ถ้า build หรือรันไม่ขึ้น ดูตารางแก้ปัญหาท้ายคู่มือ
+
+> **Preview deployments:** ต้องใช้ฐานข้อมูลแยก (เช่น Neon branch) และความลับของตัวเอง และเนื่องจาก `APP_URL` ต้องตรงกับ origin ที่ใช้จริง preview ที่ได้ URL แบบสุ่มจึงใช้ทดสอบการเข้าสู่ระบบได้ยาก ถ้าต้องการ staging ให้ทำ project แยกที่มีโดเมนคงที่ และตั้ง `APP_ENV=staging` (กฎเข้มเท่า production) **อย่าให้ preview ชี้ฐานข้อมูล production เด็ดขาด**
+
+## ขั้นที่ 8: เข้าใช้ครั้งแรก
+
+1. ผู้ดูแลคนแรก **สมัครด้วยอีเมลเดียวกับที่ใส่ใน `--admin-email` เป๊ะ ๆ** (ลิงก์เชิญใช้ได้เฉพาะอีเมลนี้ และอีเมลต้องยืนยันแล้ว)
+2. กดลิงก์ยืนยันในอีเมลที่ Resend ส่ง (ถ้าอีเมลไม่มา ดูตารางแก้ปัญหา)
+3. เข้าสู่ระบบ → เปิดลิงก์เชิญที่ได้จากขั้นที่ 3.4 → กด Accept invitation
+4. สร้างฝ่าย/ทีม/โปรเจกต์ แล้วเชิญ **ผู้ดูแลคนที่สอง** ทันที (ระบบกันไม่ให้ลบผู้ดูแลคนสุดท้าย แต่คนที่สองคือหลักประกันจริง)
+5. เปิดใช้งานการยืนยันสองขั้นตอน (2FA) ให้ผู้ดูแลที่หน้า Security
+
+## ขั้นที่ 9: พิสูจน์ว่าใช้ได้จริงบนบริการจริง (ห้ามข้าม)
+
+รันบนเครื่องของคุณ ทั้งสามคำสั่งอ่านอย่างเดียว ไม่แก้ข้อมูล
+
+```bash
+# 1) ฐานข้อมูลตามที่แอปเห็นจริง (ใช้ pooled string ของ tt_app) ตรวจ: role ไม่ข้าม RLS, migration ครบ, สิทธิ์ครบ ฯลฯ
+DATABASE_URL='<DATABASE_URL ของ tt_app>' pnpm verify:database
+
+# 2) เว็บที่ deploy แล้ว: มีชีวิต, readiness, header ความปลอดภัย, ไม่ล็อกอินเข้าข้อมูลไม่ได้, ปฏิเสธ cross-origin
+APP_URL=https://tasks.yourcompany.example CRON_SECRET='<CRON_SECRET>' pnpm smoke
+
+# 3) ไฟล์แนบตรงกับฐานข้อมูล (รันหลังมีการอัปโหลดแล้ว และหลัง restore ทุกครั้ง)
+DATABASE_URL='<DATABASE_URL ของ tt_app>' BLOB_READ_WRITE_TOKEN='<token>' pnpm verify:attachments
+```
+
+ผลที่ต้องการ: `DATABASE CHECK PASSED` และ `SMOKE TEST PASSED` (บนเครื่องผู้พัฒนาได้ 13/13 และ 17/17 บนฐานข้อมูลในเครื่อง) ข้อใด FAIL ให้แก้ก่อนไปต่อ ข้อความของแต่ละข้อบอกสาเหตุ
+
+จากนั้นตรวจด้วยมือ (สคริปต์ทำแทนไม่ได้)
+
+- [ ] สมัครด้วยอีเมลจริง: อีเมลยืนยัน **มาถึงกล่องจดหมายจริง** และลิงก์ใช้ได้
+- [ ] อัปโหลดไฟล์แนบ **ขนาดเล็ก (≤ 4 MB)** และ **ขนาด 10–20 MB** แล้วดาวน์โหลดกลับมาได้ไฟล์เหมือนเดิม
+  * ไฟล์ใหญ่เป็นการทดสอบเส้นทางอัปโหลดตรงเข้า Blob เพียงอย่างเดียว เปิด console ของเบราว์เซอร์ระหว่างอัปโหลด **ต้องไม่มี error ของ Content-Security-Policy** ที่เกี่ยวกับ `vercel.com/api/blob` ต้องเห็นข้อความแสดงความคืบหน้า และไฟล์ใน Blob dashboard ต้องเป็น **private**
+  * ถ้าไม่ผ่าน: ตั้ง `DIRECT_UPLOADS=off` แล้ว redeploy (ไฟล์จะจำกัด 4 MB) และแจ้ง URL ที่ถูกบล็อกมาเพื่อแก้
+- [ ] มอบหมายงานให้บัญชีที่สอง: การแจ้งเตือนในแอปและอีเมล **มา** (นี่คือหลักฐานว่า cron ทำงาน; ถ้าไม่มา ดูหน้า Settings ส่วน "งานเบื้องหลัง")
+- [ ] (ถ้าใช้) เพิ่ม Discord webhook แล้วส่งทดสอบ, เชื่อม Google Calendar แล้วตั้งวันครบกำหนด: ต้องเกิด event **เดียว** และเมื่อเลื่อนวันต้องย้าย ไม่ซ้ำ
+- [ ] เปิด 2FA แล้วลอง sign out/in ด้วยรหัสและด้วย backup code
+- [ ] (ถ้าตั้ง `SENTRY_DSN`) ทำให้เกิด error 500 หนึ่งครั้งแล้วดูว่ามี event เข้า tracker
+
+## ขั้นที่ 10: Backup และ monitoring (ก่อนเปิดให้ผู้ใช้จริง)
+
+1. **Neon**: ดูในคอนโซลว่าแผนของคุณเก็บประวัติ/restore ย้อนหลังได้นานเท่าไร แล้วจดไว้ **(ตรวจสอบเอง)**
+2. **Dump รายวันนอกแพลตฟอร์ม**: `scripts/backup.sh` ต้องรันจากเครื่องที่มี `pg_dump` (Vercel รันไม่ได้) ใช้ role เฉพาะที่ `BYPASSRLS` (owner ธรรมดา dump ไม่ได้ เพราะตารางทุกตัวบังคับ RLS) ดูขั้นตอนและคำสั่งใน [BACKUP_RESTORE.md](BACKUP_RESTORE.md) §2.2 ว่า Neon อนุญาตให้สร้าง role แบบ `BYPASSRLS` ไหม **ยังไม่ได้ตรวจสอบ**; ถ้าไม่ได้ ให้พึ่งการ restore ของ Neon เอง
+3. **ไฟล์แนบ**: `pnpm backup:attachments --to …` ไปยัง Blob store ตัวที่สองหรือโฟลเดอร์ ([BACKUP_RESTORE.md](BACKUP_RESTORE.md) §2.3) การ dump ฐานข้อมูลไม่รวมไฟล์
+4. **ทดสอบ restore จริงอย่างน้อยหนึ่งครั้ง** ลงฐานข้อมูลชั่วคราว ([BACKUP_RESTORE.md](BACKUP_RESTORE.md) §3) สคริปต์ทดสอบในเครื่องพิสูจน์ขั้นตอน (ผ่าน 20/20) แต่ไม่ได้พิสูจน์บริการของผู้ให้บริการคุณ
+5. **Monitoring**: ตั้ง uptime monitor เรียก `GET /api/health/ready` พร้อม header `Authorization: Bearer <CRON_SECRET>` ทุก 1–5 นาที แจ้งเตือนเมื่อไม่ใช่ 200 และตั้งแจ้งเตือนจาก log ที่มี `"level":50` หรือข้อความ `job queue needs attention`
+
+## ขั้นที่ 11: Go-live checklist
+
+ต้องครบทุกข้อก่อนเปิดให้ผู้ใช้จริง
+
+- [ ] `pnpm verify:database` ผ่านกับ role production
+- [ ] `pnpm smoke` ผ่านกับ URL production (readiness เป็น `ok`)
+- [ ] cron ทำงานตามจังหวะที่เลือก และหน้า "งานเบื้องหลัง" ไม่มีงานค้าง/ตาย
+- [ ] มี backup จริง **และทดสอบ restore แล้ว** บนแผนที่คุณจ่ายจริง
+- [ ] ตรวจช่วง restore ของ Neon และข้อจำกัด cron ของ Vercel ตรงกับแผนที่จ่ายจริง
+- [ ] โดเมน Resend verified และอีเมลถึงกล่องจดหมายจริง
+- [ ] `APP_ENCRYPTION_KEY` และ `BETTER_AUTH_SECRET` อยู่ใน password manager แยกจาก deployment
+- [ ] Preview deployments เข้าฐานข้อมูล production ไม่ได้
+- [ ] มีผู้ดูแลองค์กรอย่างน้อย 2 คน
+- [ ] กำหนดผู้รับผิดชอบเหตุด้านความปลอดภัย และอ่าน [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) แล้ว
+
+## การปล่อยเวอร์ชันถัดไป
+
+1. อ่านว่าเวอร์ชันใหม่มี migration หรือไม่ (โฟลเดอร์ `drizzle/` ใหม่; ดู [MIGRATIONS.md](MIGRATIONS.md))
+2. ถ้ามี: `pnpm db:migrate` (owner) → รัน `grants.sql` ซ้ำ → **แล้วจึง** deploy migration เป็นแบบเพิ่มอย่างเดียวและเข้ากับเวอร์ชันก่อนหน้าได้ แอปเก่าจึงทำงานต่อได้ระหว่างสลับ และ `/api/health/ready` จะรายงานถ้า build ใหม่กว่าฐานข้อมูล
+3. deploy → รัน `pnpm smoke` อีกครั้ง
+
+**Rollback**: ใน Vercel ให้ promote deployment ก่อนหน้า (ทันที) migration เป็นแบบไปข้างหน้าอย่างเดียว ถ้า migration มีปัญหาให้เขียน migration ใหม่แก้ ถ้าเสียหายหนักให้ restore จาก backup ([BACKUP_RESTORE.md](BACKUP_RESTORE.md)) หมุนกุญแจเข้ารหัส: ใช้ `APP_ENCRYPTION_KEY_PREVIOUS` กับ `pnpm rotate:key` ([SECURITY.md](SECURITY.md))
+
+## แก้ปัญหาที่พบบ่อย
+
+| อาการ | สาเหตุที่น่าจะเป็น | วิธีแก้ |
+|---|---|---|
+| ทุกหน้าตอบ 503 "Service unavailable" | role ในฐานข้อมูลของแอปข้าม RLS ได้ (เป็น superuser หรือมี `BYPASSRLS`) แอปจึงปฏิเสธให้บริการโดยตั้งใจ | ใช้ role `tt_app` ที่สร้างด้วย `NOSUPERUSER NOBYPASSRLS` ใน `DATABASE_URL` แล้วรัน `pnpm verify:database` |
+| คำขอล้มเหลวทั้งหมด / error เรื่องตัวแปร | ตัวแปรขาด หรือรูปแบบผิด (เช่น `APP_URL` ไม่ใช่ https, `SENTRY_DSN` ไม่ใช่ https) | log บอกชื่อตัวแปร แก้ใน Vercel แล้ว redeploy |
+| error `permission denied` ใน log / บางหน้า 500 | ยังไม่ได้รัน `grants.sql` หลัง migrate | รัน grants ซ้ำ (ขั้นที่ 3.3) |
+| `/api/health/ready` รายงาน `migrations` ไม่ผ่าน | build ใหม่กว่าฐานข้อมูล | `pnpm db:migrate` แล้วรัน grants |
+| `/api/health/ready` หรือ `/api/cron/tick` ได้ 401 | ไม่ส่ง หรือส่งค่า `CRON_SECRET` ไม่ตรง | ตรวจ header `Authorization: Bearer <ค่าเดียวกับใน Vercel>` |
+| กดบันทึก/ล็อกอินแล้วได้ 403 | `APP_URL` ไม่ตรงกับโดเมนที่ใช้เข้า (เช่น มี/ไม่มี `www.`) | แก้ `APP_URL` ให้ตรงเป๊ะ แล้ว redeploy |
+| อีเมลไม่มา | โดเมน Resend ยังไม่ verified, `EMAIL_FROM` ไม่อยู่บนโดเมนนั้น, API key ผิด, หรือ cron ไม่ทำงาน | ตรวจ Resend; ดูหน้า "งานเบื้องหลัง" ว่ามีงาน `notification.email` ค้างไหม |
+| ลิงก์เชิญใช้ไม่ได้ | อีเมลที่สมัครไม่ตรงกับที่ใส่ตอน bootstrap, ยังไม่ได้ยืนยันอีเมล, หรือครบ 7 วัน | สมัครด้วยอีเมลที่ถูกต้อง หรือรัน `pnpm bootstrap` ซ้ำเพื่อออกลิงก์ใหม่ |
+| อัปโหลดไฟล์ไม่ได้ ("attachments unavailable") | ไม่ได้ตั้ง `BLOB_READ_WRITE_TOKEN` | ตั้งโทเค็น (ขั้นที่ 5) |
+| ไฟล์ใหญ่ (> 4 MB) อัปโหลดไม่ผ่าน และ console มี error CSP | host ของ Blob API ใน CSP ไม่ตรงกับที่ใช้จริง (ยังไม่เคยทดสอบ) | ตั้ง `DIRECT_UPLOADS=off` ชั่วคราว และแจ้ง URL ที่ถูกบล็อก |
+| การแจ้งเตือนช้ามาก | cron ไม่ได้ทำงานทุกนาที (แผนจำกัด) | ใช้ตัวตั้งเวลาภายนอก (ขั้นที่ 7.4) |
+| `pg_dump` ล้มเหลวด้วย "row-level security policy" | ใช้ role ที่ไม่มี `BYPASSRLS` | ใช้ role สำรองข้อมูลเฉพาะ ดู [BACKUP_RESTORE.md](BACKUP_RESTORE.md) §2.2 |
+
+หากปัญหาไม่อยู่ในตาราง: ดู `x-request-id` ใน response header ของคำขอที่พัง แล้วค้นค่านั้นใน log ของ Vercel ทุกบรรทัด error ของคำขอนั้นมีค่านี้กำกับ (และข้อมูลผู้ใช้ถูกตัดออกแล้ว)

@@ -74,6 +74,7 @@ tests/            unit · integration · e2e        docs/      documentation
 | [KNOWN_LIMITATIONS](docs/KNOWN_LIMITATIONS.md) | Deviations from the brief, unverified items, decisions left to the owner |
 | [ARCHITECTURE](docs/ARCHITECTURE.md) | Layers, request lifecycle, jobs, decisions |
 | [DEPLOYMENT](docs/DEPLOYMENT.md) | Vercel, Neon, Resend, Google, Blob; verification scripts; go-live checklist; rollback |
+| [DEPLOYMENT_TH](docs/DEPLOYMENT_TH.md) | คู่มือ deploy ภาษาไทยทีละขั้น (Neon → Resend → Blob → Vercel → ตรวจสอบ → go-live) |
 | [ENVIRONMENT](docs/ENVIRONMENT.md) | Every variable, where it is used, how to generate it |
 | [SECURITY](docs/SECURITY.md) | Threat model, controls with evidence, findings, incident procedures |
 | [RBAC](docs/RBAC.md) | Roles, scopes, evaluation rules, permission matrix (generated) |
