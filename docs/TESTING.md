@@ -7,9 +7,11 @@ Everything here was run on the release candidate; the exact results are in [READ
 ```bash
 pnpm lint                      # ESLint (React hooks rules included)
 pnpm typecheck                 # tsc --noEmit
-pnpm test:unit                 # 163 tests, no database
-TEST_DATABASE_URL=postgres://postgres@127.0.0.1:54329/tasktracker_test pnpm test:integration   # 340 tests
-pnpm test:e2e                  # builds, then 78 browser tests (Chromium) against a production build
+pnpm test:unit                 # 266 tests, no database
+TEST_DATABASE_URL=postgres://postgres@127.0.0.1:54329/tasktracker_test pnpm test:integration   # 407 tests
+pnpm test:e2e                  # builds, then 84 browser tests (Chromium) against a production build
+pnpm test:e2e:browsers         # the same suite once per engine (chromium, firefox, webkit); the last two have never been run
+pnpm load                      # load test against a production build with seeded volume (see below)
 pnpm build                     # production build
 pnpm audit --prod              # known vulnerabilities in shipped dependencies
 pnpm backup:restore-test       # dump → restore → compare → prove isolation on the restored copy
@@ -66,7 +68,8 @@ Local PostgreSQL for the tests (no Docker needed): a PostgreSQL 16 cluster on po
 | Attachment backup: skip the source hash check; make the dry run write; ignore `--verify` | 2, 1 and 1 tests failed |
 | Direct upload: no content sniffing; no size cap; accept any object name; leave rejected objects in the store; token allows overwrite/any type | 1, 1, 2, 2 and 1 tests failed |
 | Markdown: accept any URL scheme; drop `rel`/`target`; disable the look-alike link warning; remove the work budget | 1, 11, 1 and 3 tests failed (the budget one only after the time limit was tightened: with the loose limit it passed, i.e. the test could not fail) |
-| Change signals: ignore permissions; stop touching `updated_at` for labels; count everyone's notifications; skip the task access check on comments | 2, 1, 1 and 2 tests failed |
+| Change signals: ignore permissions; stop touching `updated_at` for labels; count everyone's notifications; skip the task access check on comments; leave the readable-project list out of the fingerprint | 2, 1, 1, 2 and 1 tests failed (the last one only after the test was rewritten: the first version passed the broken code) |
+| Notification rendering: show tasks of deleted projects | 1 test failed |
 | Signal hub: no retention across leave-and-return | 1 test failed |
 
 ## Bugs the test suites found while being written (all fixed)
