@@ -5,7 +5,7 @@
  * Inline style *attributes* are allowed (`style-src-attr`) because the UI sets sizes and colours with them; style
  * *elements* still need the nonce. Attributes cannot run script, so this is a deliberate, narrow concession.
  */
-export function buildCsp(nonce: string, o: { dev?: boolean; upgrade?: boolean } = {}): string {
+export function buildCsp(nonce: string, o: { dev?: boolean; upgrade?: boolean; /** allow the browser to talk to the Vercel Blob API (direct uploads) */ blobUploads?: boolean } = {}): string {
   const dev = !!o.dev;
   // Only meaningful (and only safe) when the site is served over HTTPS; browsers would break plain-http test servers.
   const upgrade = o.upgrade ?? !dev;
@@ -16,7 +16,7 @@ export function buildCsp(nonce: string, o: { dev?: boolean; upgrade?: boolean } 
     "style-src-attr 'unsafe-inline'",
     "img-src 'self' data:", // data: for the two-factor QR code, which is generated in the browser
     "font-src 'self'",
-    `connect-src 'self'${dev ? " ws:" : ""}`,
+    `connect-src 'self'${o.blobUploads ? " https://vercel.com/api/blob/" : ""}${dev ? " ws:" : ""}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

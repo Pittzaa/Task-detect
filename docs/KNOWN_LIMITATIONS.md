@@ -6,7 +6,7 @@ Honest list. “Deviation” = the brief asked for something this release does n
 
 | # | Brief | What was built | Why / how to close it |
 |---|---|---|---|
-| 1 | Attachments up to **25 MB** | **4 MB** per file, 25 per task | Uploads pass through a Vercel function whose request body is reportedly capped near 4.5 MB (unverified). Direct-to-Blob client uploads (token endpoint + client SDK + completion callback) would lift it; not built. |
+| 1 | Attachments up to **25 MB** | **4 MB** through the server, **25 MB** through a direct browser → Blob upload (built, **untested against a real Blob store**), 25 files per task | The direct path is verified up to the edge of the Blob service: the token endpoint (session, permission, rate limit, name/size/type constraints, decoded and asserted) and the server-side inspection of the stored object are tested with real code; the browser → Vercel Blob request itself, the CSP entry `connect-src https://vercel.com/api/blob/` (taken from the SDK source) and private-store support for client tokens are **unverified** until you run the checklist in [DEPLOYMENT.md](DEPLOYMENT.md) §8. Without a Blob token (development) only the 4 MB path exists. |
 | 2 | Markdown in comments/descriptions | **Plain text only** (line breaks kept) | Removes an XSS class. A sanitized Markdown renderer can be added later. |
 | 3 | Real-time updates | **Polling** (notifications 30 s, comments 20 s, lists 30–60 s, plus refetch on focus) | Serverless friendly. An SSE/WebSocket signal channel (e.g. Ably/Pusher) was not built. |
 | 4 | Push notifications | Not implemented | Explicitly out of scope until later. |
@@ -45,7 +45,7 @@ Use `pnpm verify:database`, `pnpm smoke`, `pnpm verify:attachments` and the manu
 
 1. Vercel plan: per-minute cron (Pro) vs. an external scheduler ([DEPLOYMENT.md](DEPLOYMENT.md) §0).
 2. How and where to run the daily backup and the monthly restore drill, and whether to back up Blob.
-3. Whether to build direct-to-Blob uploads to reach 25 MB.
+3. Whether to keep direct-to-Blob uploads switched on after you have tried them on the real store (`DIRECT_UPLOADS=off` turns them off without a redeploy of code).
 4. A security contact address and an incident owner.
 5. Whether Markdown, real-time push of changes, and SSO/SCIM are wanted in the next release.
 6. Retention periods (30-day trash, 90-day notifications) — adjust `src/domain/retention.ts` if your policy differs.

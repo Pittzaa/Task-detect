@@ -4,6 +4,13 @@
  */
 export const MAX_UPLOAD_BYTES = 4_000_000; // stays under Vercel's ~4.5 MB request body limit (verify; see docs)
 export const MAX_ATTACHMENTS_PER_TASK = 25;
+/** Largest file accepted through a direct browser -> Blob upload (only offered where a Blob store is configured). */
+export const MAX_DIRECT_UPLOAD_BYTES = 25_000_000;
+
+const KEY_UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+/** The only object name a direct upload may use: bound to one organization and one task, so a token can never write elsewhere. */
+export const directUploadKeyPattern = (orgId: string, taskId: string) => new RegExp(`^orgs/${orgId}/tasks/${taskId}/${KEY_UUID}$`, "i");
+export const isDirectUploadKey = (key: string, orgId: string, taskId: string) => /^[0-9a-f-]{36}$/i.test(orgId) && /^[0-9a-f-]{36}$/i.test(taskId) && directUploadKeyPattern(orgId, taskId).test(key);
 
 export interface DetectedFile {
   contentType: string;

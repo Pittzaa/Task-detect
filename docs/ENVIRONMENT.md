@@ -34,6 +34,7 @@ entries behaves as expected, and a blank *required* variable still fails validat
 | `BLOB_READ_WRITE_TOKEN` | for attachments | `src/integrations/storage/blob.ts` | Vercel Blob **private** store token. Without it, production refuses uploads (attachments unavailable) instead of silently using an ephemeral disk. |
 | `SENTRY_DSN` | optional | `src/lib/error-report.ts` | An **https** DSN of a Sentry-compatible tracker (`https://<key>@<host>/<project-id>`). When set, unexpected server errors are sent there as a redacted event (error class, database error code, constraint name, first stack frames, path without query string, request id; **no** message parameters, headers or cookies). Rejected in production/staging if not https. Unset = errors only go to the log. |
 | `APP_RELEASE` | optional | `src/lib/error-report.ts` | Release label attached to reported errors; defaults to `VERCEL_GIT_COMMIT_SHA` when Vercel provides it. |
+| `DIRECT_UPLOADS` | optional (`on`) | `src/server/runtime.ts`, `src/proxy.ts` | `off` disables direct browser → Blob uploads (the 4–25 MB path): files are then limited to 4 MB through the server and the CSP no longer names `vercel.com`. A kill switch for a path that has not been run against a real Blob store. |
 | `EMAIL_SINK_FILE` | never in production | `src/integrations/email` | Appends outgoing mail to a file for E2E tests. Rejected by validation in production/staging. |
 
 ### Test and tooling variables (never set on a deployment)

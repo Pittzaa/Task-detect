@@ -55,6 +55,12 @@ describe("deployment tiers", () => {
     expect(env.GOOGLE_CLIENT_ID).toBeUndefined();
     expect(() => getEnv({ ...prod, RESEND_API_KEY: "" } as unknown as NodeJS.ProcessEnv)).toThrow(/RESEND_API_KEY/);
   });
+  it("DIRECT_UPLOADS is an on/off switch and nothing else", () => {
+    const prod = { DATABASE_URL: "postgres://x", NODE_ENV: "production", APP_URL: "https://app.example", BETTER_AUTH_SECRET: "x".repeat(40), APP_ENCRYPTION_KEY: "k", RESEND_API_KEY: "r", EMAIL_FROM: "a@b.c", CRON_SECRET: "c".repeat(20) };
+    expect(getEnv(prod as unknown as NodeJS.ProcessEnv).DIRECT_UPLOADS).toBeUndefined();
+    expect(getEnv({ ...prod, DIRECT_UPLOADS: "off" } as unknown as NodeJS.ProcessEnv).DIRECT_UPLOADS).toBe("off");
+    expect(() => getEnv({ ...prod, DIRECT_UPLOADS: "maybe" } as unknown as NodeJS.ProcessEnv)).toThrow(/DIRECT_UPLOADS/);
+  });
   it("staging is held to production rules", () => {
     expect(() => getEnv({ ...base, NODE_ENV: "production", APP_ENV: "staging" } as unknown as NodeJS.ProcessEnv)).toThrow(/BETTER_AUTH_SECRET/);
   });

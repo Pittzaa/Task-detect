@@ -25,6 +25,9 @@ const schema = z
     GOOGLE_CALENDAR_CLIENT_SECRET: optional,
     CRON_SECRET: z.string().min(16).optional(),
     BLOB_READ_WRITE_TOKEN: optional,
+    // "off" disables direct browser -> Blob uploads (files are then limited to 4 MB through the server). A kill switch for a path
+    // that has not been exercised against a real Blob store by the author.
+    DIRECT_UPLOADS: z.enum(["on", "off"]).optional(),
     // Development/E2E only: append outgoing emails to this file instead of sending. Forbidden in production.
     EMAIL_SINK_FILE: optional,
     // Optional error tracking (Sentry-compatible DSN, https only). Unexpected server errors are reported with redacted details.

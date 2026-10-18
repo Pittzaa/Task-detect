@@ -167,6 +167,19 @@ test("attachments: allowed files upload and download as attachments, HTML is ref
   await expect(d.getByRole("link", { name: "evil.html" })).toHaveCount(0);
 });
 
+test("attachments: a file over the server limit is refused up front when no Blob store is configured, without sending it", async ({ page }) => {
+  await login(page, "admin@e2e.test");
+  await openTask(page, "Design the homepage");
+  const d = drawer(page);
+  await expect(d.getByText(/Max 4 MB/)).toBeVisible(); // large uploads are only offered where a Blob store exists
+  let uploads = 0;
+  page.on("request", (r) => { if (r.method() === "POST" && /\/attachments(\/direct)?$/.test(new URL(r.url()).pathname)) uploads++; });
+  await d.getByLabel("Upload file").setInputFiles({ name: "big.pdf", mimeType: "application/pdf", buffer: Buffer.concat([Buffer.from("%PDF-1.7\n"), Buffer.alloc(5_000_000, 0x20)]) });
+  await expect(page.getByText("This file is too large (the limit is 4 MB).")).toBeVisible();
+  await expect(d.getByRole("link", { name: "big.pdf" })).toHaveCount(0);
+  expect(uploads).toBe(0);
+});
+
 test("delete a task and bring it back with undo", async ({ page }) => {
   await login(page, "admin@e2e.test");
   await createTask(page, "Temporary task");

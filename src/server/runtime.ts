@@ -14,6 +14,8 @@ export interface Runtime {
   auth: Auth;
   email: EmailSender;
   store: ObjectStore;
+  /** Set when a Vercel Blob store is configured: enables direct browser -> Blob uploads of large files. */
+  blobToken?: string;
   appUrl: string;
   /** Current encryption key first. Empty when APP_ENCRYPTION_KEY is not configured (secrets features then refuse to run). */
   encryptionKeys: string[];
@@ -59,7 +61,7 @@ export function getRuntime(): Runtime {
     ? { clientId: env.GOOGLE_CALENDAR_CLIENT_ID, clientSecret: env.GOOGLE_CALENDAR_CLIENT_SECRET, redirectUri: `${env.APP_URL}/api/calendar/callback` }
     : undefined;
   const rt: Runtime = {
-    db, auth, email, store, appUrl: env.APP_URL, encryptionKeys, google: googleCfg ? createGoogleClient(googleCfg) : undefined, googleSignIn: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
+    db, auth, email, store, blobToken: env.DIRECT_UPLOADS === "off" ? undefined : env.BLOB_READ_WRITE_TOKEN, appUrl: env.APP_URL, encryptionKeys, google: googleCfg ? createGoogleClient(googleCfg) : undefined, googleSignIn: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
     jobContext: () => ({ db, email, store, appUrl: env.APP_URL, encryptionKeys, fetchImpl: fetch, google: googleCfg, now: () => new Date() }),
   };
   g[KEY] = rt;

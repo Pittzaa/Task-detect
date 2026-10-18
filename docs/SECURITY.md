@@ -58,7 +58,7 @@ Evidence: T `rbac.test.ts`, `account.test.ts`, `tasks.test.ts` (42), `productivi
 
 ### 2.5 Files
 
-Server-side upload (≤ 4 MB, ≤ 25 per task) with **content sniffing**: the type is decided from the bytes and must agree with the extension; SVG, HTML, scripts and archives are rejected; filenames are sanitized and never used for storage — keys are opaque server-generated paths.
+Server-side upload (≤ 4 MB, ≤ 25 per task) or **direct upload to Blob** (≤ 25 MB; the browser sends the bytes to the store with a 10-minute token that is bound to one object name `orgs/<org>/tasks/<task>/<uuid>`, 25 MB, the generic type `application/octet-stream`, no overwrite and no completion callback; the server then reads the stored object back and applies the same checks, deleting it if it fails — nothing the browser reports is believed) with **content sniffing**: the type is decided from the bytes and must agree with the extension; SVG, HTML, scripts and archives are rejected; filenames are sanitized and never used for storage — keys are opaque server-generated paths.
 Downloads go through an authenticated, permission-checked route and are sent as `attachment` with `nosniff` and a sandboxing CSP; the Blob store itself is private. T `attachments-http.test.ts`, unit `files.test.ts`, E `02-task-lifecycle` (png round-trip byte-for-byte; html refused).
 **Not done:** malware scanning, previews/thumbnails (so no image-decoder attack surface), and **file contents are not covered by backups** (see [BACKUP_RESTORE.md](BACKUP_RESTORE.md)).
 

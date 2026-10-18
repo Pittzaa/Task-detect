@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { TASK_PRIORITIES, allowedTransitions, type TaskPriority, type TaskStatus } from "@/domain/workflow";
 import { MAX_UPLOAD_BYTES } from "@/domain/files";
+import { uploadLargeFile } from "./upload-large";
 import { allMessages } from "@/i18n";
 import { api, ApiError } from "../api";
 import { Btn, Drawer, Empty, ErrorNote, Field, Loading, Notice, PriorityBadge, StatusBadge, useToast } from "../components";
@@ -47,13 +48,14 @@ function DrawerBody({ task, reload, onClose, onOpen }: { task: Detail; reload: (
   const fields = useQuery<{ fields: FieldDef[] }>(`fields:${orgId}`, () => api(`/api/orgs/${orgId}/custom-fields`));
   const comments = useQuery<{ comments: Comment[] }>(`comments:${task.id}`, () => api(`/api/orgs/${orgId}/tasks/${task.id}/comments`), { refreshMs: 20_000 });
   const activity = useQuery<{ activity: Activity[] }>(`activity:${task.id}:${task.version}`, () => api(`/api/orgs/${orgId}/tasks/${task.id}/activity?limit=30`));
-  const files = useQuery<{ attachments: Attachment[] }>(`files:${task.id}`, () => api(`/api/orgs/${orgId}/tasks/${task.id}/attachments`));
+  const files = useQuery<{ attachments: Attachment[]; limits?: { serverMaxBytes: number; directMaxBytes: number | null } }>(`files:${task.id}`, () => api(`/api/orgs/${orgId}/tasks/${task.id}/attachments`));
   const nameOf = useMemo(() => new Map((people.data?.people ?? []).map((x) => [x.id, x.name])), [people.data]);
 
   // ---- editable core fields
   const [form, setForm] = useState({ title: task.title, description: task.description, priority: task.priority, startDate: task.startDate ?? "", dueDate: task.dueDate ?? "", reminder: task.reminderDaysBefore === null ? "" : String(task.reminderDaysBefore) });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
   const dirty = form.title !== task.title || form.description !== task.description || form.priority !== task.priority || form.startDate !== (task.startDate ?? "") || form.dueDate !== (task.dueDate ?? "") || form.reminder !== (task.reminderDaysBefore === null ? "" : String(task.reminderDaysBefore));
 
   async function save(e: React.FormEvent) {
@@ -171,14 +173,28 @@ function DrawerBody({ task, reload, onClose, onOpen }: { task: Detail; reload: (
         {p.attach && (
           <div className="field" style={{ marginTop: "0.6rem" }}>
             <label htmlFor="upload">{t("ui.upload")}</label>
-            <input id="upload" type="file" onChange={async (e) => {
+            <input id="upload" type="file" disabled={uploadPct !== null} onChange={async (e) => {
               const f = e.target.files?.[0]; e.target.value = "";
               if (!f) return;
-              const fd = new FormData(); fd.set("file", f);
-              const res = await fetch(`/api/orgs/${orgId}/tasks/${task.id}/attachments`, { method: "POST", body: fd, credentials: "same-origin" });
-              if (!res.ok) { const j = await res.json().catch(() => null); toast(j?.error?.message ?? t("error.generic"), "error"); } else files.reload();
+              const serverMax = files.data?.limits?.serverMaxBytes ?? MAX_UPLOAD_BYTES;
+              const directMax = files.data?.limits?.directMaxBytes ?? null;
+              if (f.size > Math.max(serverMax, directMax ?? 0)) { toast(t("ui.file_too_large", { mb: Math.floor(Math.max(serverMax, directMax ?? 0) / 1_000_000) }), "error"); return; }
+              try {
+                if (f.size > serverMax) {
+                  setUploadPct(0);
+                  await uploadLargeFile({ orgId, taskId: task.id, file: f, onProgress: setUploadPct });
+                } else {
+                  const fd = new FormData(); fd.set("file", f);
+                  const res = await fetch(`/api/orgs/${orgId}/tasks/${task.id}/attachments`, { method: "POST", body: fd, credentials: "same-origin" });
+                  if (!res.ok) { const j = await res.json().catch(() => null); toast(j?.error?.message ?? t("error.generic"), "error"); return; }
+                }
+                files.reload();
+              } catch (e2) {
+                toast(e2 instanceof ApiError ? err(e2) : t("ui.upload_failed"), "error");
+              } finally { setUploadPct(null); }
             }} />
-            <span className="hint">{t("ui.max_size", { mb: Math.floor(MAX_UPLOAD_BYTES / 1_000_000) })}</span>
+            {uploadPct !== null && <span role="status" className="hint">{t("ui.uploading", { pct: Math.round(uploadPct) })}</span>}
+            <span className="hint">{t("ui.max_size", { mb: Math.floor((files.data?.limits?.directMaxBytes ?? files.data?.limits?.serverMaxBytes ?? MAX_UPLOAD_BYTES) / 1_000_000) })}</span>
           </div>
         )}
       </section>

@@ -33,6 +33,13 @@ describe("content security policy", () => {
     expect(dev).not.toContain("upgrade-insecure-requests");
   });
 
+  it("the browser may talk to the Vercel Blob API only when direct uploads are configured, and only to its /api/blob/ path", () => {
+    expect(buildCsp("n")).not.toContain("vercel.com");
+    const csp2 = buildCsp("n", { blobUploads: true });
+    expect(csp2).toContain("connect-src 'self' https://vercel.com/api/blob/;");
+    expect(csp2).not.toMatch(/connect-src[^;]*\*/);
+  });
+
   it("the HTTPS upgrade directive can be switched off for plain-http test servers", () => {
     expect(buildCsp("n", { upgrade: false })).not.toContain("upgrade-insecure-requests");
   });

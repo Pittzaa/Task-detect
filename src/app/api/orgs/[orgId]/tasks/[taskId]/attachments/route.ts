@@ -1,12 +1,19 @@
 import { listAttachments, uploadAttachment } from "@/data/attachments";
-import { MAX_UPLOAD_BYTES } from "@/domain/files";
+import { MAX_DIRECT_UPLOAD_BYTES, MAX_UPLOAD_BYTES } from "@/domain/files";
 import { validation } from "@/lib/errors";
 import { handle } from "@/server/api";
 import { uuid } from "@/server/schemas";
 
 type P = { params: Promise<{ orgId: string; taskId: string }> };
 export const GET = (req: Request, { params }: P) =>
-  handle(req, async (c) => { const p = await params; return { attachments: await c.tenant(p.orgId, (s) => listAttachments(s, uuid.parse(p.taskId))) }; });
+  handle(req, async (c) => {
+    const p = await params;
+    return {
+      attachments: await c.tenant(p.orgId, (s) => listAttachments(s, uuid.parse(p.taskId))),
+      // what this deployment accepts, so the page can choose between a normal upload and a direct one
+      limits: { serverMaxBytes: MAX_UPLOAD_BYTES, directMaxBytes: c.rt.blobToken ? MAX_DIRECT_UPLOAD_BYTES : null },
+    };
+  });
 
 export const POST = (req: Request, { params }: P) =>
   handle(req, async (c) => {

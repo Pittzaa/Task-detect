@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { attachments, auditLogs, taskActivity } from "@/db/schema";
-import { MAX_ATTACHMENTS_PER_TASK, MAX_UPLOAD_BYTES, detectFile, sanitizeFilename } from "@/domain/files";
+import { MAX_ATTACHMENTS_PER_TASK, MAX_DIRECT_UPLOAD_BYTES, MAX_UPLOAD_BYTES, detectFile, isDirectUploadKey, sanitizeFilename } from "@/domain/files";
 import { sha256Hex } from "@/lib/crypto";
-import { forbidden, notFound, validation } from "@/lib/errors";
+import { conflict, forbidden, notFound, validation } from "@/lib/errors";
 import type { ObjectStore } from "@/integrations/storage";
 import { can } from "@/authz/evaluate";
 import { consumeRateLimit } from "@/server/rate-limit";
@@ -38,6 +38,76 @@ export async function uploadAttachment(s: TenantSession, store: ObjectStore, tas
   await store.put(storageKey, file.bytes);
   await s.tx.insert(taskActivity).values({ orgId: s.orgId, taskId: task.id, actorId: s.userId, type: "attachment_added", changes: { attachmentId: row!.id } });
   await s.tx.insert(auditLogs).values({ orgId: s.orgId, actorUserId: s.userId, action: "attachment.upload", targetType: "attachment", targetId: row!.id, metadata: { sizeBytes: row!.sizeBytes } });
+  return row!;
+}
+
+async function attachmentCount(s: TenantSession, taskId: string): Promise<number> {
+  const rows = await s.tx.select({ n: sql<number>`count(*)::int` }).from(attachments).where(and(eq(attachments.orgId, s.orgId), eq(attachments.taskId, taskId), isNull(attachments.deletedAt)));
+  return rows[0]?.n ?? 0;
+}
+
+/**
+ * Step 1 of a direct (browser -> Blob) upload: may this person put a file on this task, and is this the object name we allow?
+ * Called while a short-lived upload token is being issued. The token is then bound to this exact name, size limit and a generic
+ * content type, so it cannot be used for anything else. The file is NOT trusted until `finalizeDirectUpload` has inspected it.
+ */
+export async function authorizeDirectUpload(s: TenantSession, taskId: string, pathname: string) {
+  const { task, scope } = await loadTask(s, taskId);
+  if (!can(s.principal, "task.attach", scope)) throw forbidden({ permission: "task.attach" });
+  if (!isDirectUploadKey(pathname, s.orgId, task.id)) throw validation("Invalid upload path");
+  await consumeRateLimit(s.tx as unknown as Db, `upload-token:${s.userId}`, 60, 20);
+  if ((await attachmentCount(s, task.id)) >= MAX_ATTACHMENTS_PER_TASK) throw validation("Too many attachments on this task");
+  return { maximumSizeInBytes: MAX_DIRECT_UPLOAD_BYTES };
+}
+
+async function readCapped(stream: ReadableStream<Uint8Array>, max: number): Promise<Buffer> {
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const reader = stream.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) { await reader.cancel().catch(() => undefined); throw validation("File is too large", { maxBytes: max }); }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
+
+/**
+ * Step 2: the browser says the upload finished. Nothing the browser claims is believed: the object is read back from the store,
+ * its size and SHA-256 are computed here, its type is decided from its bytes, and the same permission, rate and count limits as a
+ * normal upload apply. A file that fails any check is deleted from the store. Safe to call twice (it returns the existing record).
+ */
+export async function finalizeDirectUpload(s: TenantSession, store: ObjectStore, taskId: string, input: { key: string; name: string }) {
+  const { task, scope } = await loadTask(s, taskId, { forUpdate: true });
+  if (!can(s.principal, "task.attach", scope)) throw forbidden({ permission: "task.attach" });
+  if (!isDirectUploadKey(input.key, s.orgId, task.id)) throw validation("Invalid upload path");
+
+  const [known] = await s.tx.select({ id: attachments.id, taskId: attachments.taskId, uploadedBy: attachments.uploadedBy, filename: attachments.filename, contentType: attachments.contentType, sizeBytes: attachments.sizeBytes, deletedAt: attachments.deletedAt })
+    .from(attachments).where(eq(attachments.storageKey, input.key));
+  if (known) {
+    if (known.taskId !== task.id || known.uploadedBy !== s.userId || known.deletedAt) throw conflict("This upload was already used");
+    return { id: known.id, filename: known.filename, contentType: known.contentType, sizeBytes: known.sizeBytes };
+  }
+  await consumeRateLimit(s.tx as unknown as Db, `upload:${s.userId}`, 60, 20);
+  if ((await attachmentCount(s, task.id)) >= MAX_ATTACHMENTS_PER_TASK) { await store.delete(input.key).catch(() => undefined); throw validation("Too many attachments on this task"); }
+
+  const obj = await store.get(input.key);
+  if (!obj) throw validation("The upload did not arrive. Try again");
+  const reject = async (e: Error): Promise<never> => { await store.delete(input.key).catch(() => undefined); throw e; };
+  let bytes: Buffer;
+  try { bytes = await readCapped(obj.stream, MAX_DIRECT_UPLOAD_BYTES); } catch (e) { return reject(e as Error); }
+  if (bytes.length === 0) return reject(validation("File is empty"));
+  const detected = detectFile(bytes, input.name);
+  if (!detected) return reject(validation("This file type is not allowed"));
+
+  const [row] = await s.tx
+    .insert(attachments)
+    .values({ orgId: s.orgId, taskId: task.id, uploadedBy: s.userId, storageKey: input.key, filename: sanitizeFilename(input.name), contentType: detected.contentType, sizeBytes: bytes.length, sha256: sha256Hex(bytes) })
+    .returning({ id: attachments.id, filename: attachments.filename, contentType: attachments.contentType, sizeBytes: attachments.sizeBytes });
+  await s.tx.insert(taskActivity).values({ orgId: s.orgId, taskId: task.id, actorId: s.userId, type: "attachment_added", changes: { attachmentId: row!.id } });
+  await s.tx.insert(auditLogs).values({ orgId: s.orgId, actorUserId: s.userId, action: "attachment.upload", targetType: "attachment", targetId: row!.id, metadata: { sizeBytes: row!.sizeBytes, direct: true } });
   return row!;
 }
 
