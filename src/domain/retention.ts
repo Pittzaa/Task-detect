@@ -11,6 +11,10 @@ export const RETENTION = {
   attachmentTrashDays: 30,
   /** Soft-deleted saved views. */
   viewTrashDays: 30,
+  /** Individually deleted comments (their text is removed for good after this). */
+  commentTrashDays: 30,
+  /** Deleted Discord destinations (the webhook secret itself is destroyed at deletion time). */
+  destinationTrashDays: 30,
   finishedJobDays: 7,
   /** Dead-lettered jobs are kept longer so an operator can investigate them. */
   deadJobDays: 30,

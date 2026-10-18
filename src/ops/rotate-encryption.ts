@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { calendarConnections, integrationDestinations, organizations } from "@/db/schema";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
@@ -31,7 +31,7 @@ export async function rotateEncryptionKey(db: Db, keys: string[], o: { orgId?: s
 
   for (const org of orgs) {
     await withWorkerOrg(db, org.id, async (tx) => {
-      for (const d of await tx.select({ id: integrationDestinations.id, c: integrationDestinations.webhookCiphertext }).from(integrationDestinations).where(eq(integrationDestinations.orgId, org.id))) {
+      for (const d of await tx.select({ id: integrationDestinations.id, c: integrationDestinations.webhookCiphertext }).from(integrationDestinations).where(and(eq(integrationDestinations.orgId, org.id), isNull(integrationDestinations.deletedAt)))) {
         try {
           const r = reencrypt(d.c, `dest:${d.id}`);
           if (r.current) { report.alreadyCurrent++; continue; }

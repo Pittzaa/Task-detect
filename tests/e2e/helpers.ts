@@ -22,7 +22,7 @@ export async function waitMail(to: string, pattern: RegExp, since = 0): Promise<
 }
 export const linkIn = (m: Mail) => m.text.match(/https?:\/\/\S+/)![0].replace(/[).,]+$/, "");
 
-export async function useEnglish(page: Page) {
+export async function preferEnglish(page: Page) {
   await page.context().addCookies([{ name: "tt_locale", value: "en", url: "http://localhost:3100" }]);
 }
 

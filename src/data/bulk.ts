@@ -32,23 +32,27 @@ export async function bulkUpdate(s: TenantSession, input: { taskIds: string[]; a
   if (ids.length > MAX_BULK) throw validation(`At most ${MAX_BULK} tasks per request`);
   await consumeRateLimit(s.tx as unknown as Db, `bulk:${s.userId}`, 600, 20);
 
-  const results: BulkItemResult[] = [];
-  for (const taskId of ids) {
+  // Rows are locked as each item is processed and the locks last until the whole request commits. Two requests over the same
+  // tasks in opposite orders would deadlock, so every request locks in one global order (ascending id) and the results are
+  // put back in the caller's order afterwards.
+  const byId = new Map<string, BulkItemResult>();
+  for (const taskId of [...ids].sort()) {
     try {
       await (s.tx as Tx).transaction(async (sp) => {
         const sub: TenantSession = { ...s, tx: sp as Tx };
         await applyOne(sub, taskId, input.action);
       });
-      results.push({ taskId, ok: true });
+      byId.set(taskId, { taskId, ok: true });
     } catch (e) {
       if (e instanceof AppError && ["NOT_FOUND", "FORBIDDEN", "VALIDATION", "CONFLICT"].includes(e.code)) {
-        results.push({ taskId, ok: false, code: e.code as "NOT_FOUND" | "FORBIDDEN" | "VALIDATION" | "CONFLICT" });
+        byId.set(taskId, { taskId, ok: false, code: e.code as "NOT_FOUND" | "FORBIDDEN" | "VALIDATION" | "CONFLICT" });
       } else {
         logger.error({ err: e instanceof Error ? e.message : "unknown" }, "bulk item failed");
-        results.push({ taskId, ok: false, code: "ERROR" });
+        byId.set(taskId, { taskId, ok: false, code: "ERROR" });
       }
     }
   }
+  const results: BulkItemResult[] = ids.map((id) => byId.get(id)!);
   const failed = results.filter((r) => !r.ok).length;
   if (input.atomic && failed > 0) {
     const rolledBack: BulkItemResult[] = results.map((r) => (r.ok ? { taskId: r.taskId, ok: false, code: "ROLLED_BACK" } : r));
@@ -67,7 +71,8 @@ async function applyOne(s: TenantSession, taskId: string, action: BulkAction) {
   } else if (action.type === "assignee") {
     await setPrimaryAssignee(s, taskId, action.userId);
   } else {
-    const [row] = await s.tx.select({ version: tasks.version }).from(tasks).where(and(eq(tasks.orgId, s.orgId), eq(tasks.id, taskId), isNull(tasks.deletedAt)));
+    // Locked, so the version read here is the current one (a bulk change is not a stale form submission).
+    const [row] = await s.tx.select({ version: tasks.version }).from(tasks).where(and(eq(tasks.orgId, s.orgId), eq(tasks.id, taskId), isNull(tasks.deletedAt))).for("update");
     if (!row) throw new AppError("NOT_FOUND", "Not found", 404);
     // updateTask re-checks read access and task.update before changing anything.
     await updateTask(s, taskId, action.type === "priority" ? { version: row.version, priority: action.priority } : { version: row.version, dueDate: action.dueDate });

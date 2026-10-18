@@ -2,7 +2,7 @@ import { afterEach, afterAll, beforeAll, describe, expect, it } from "vitest";
 import { enableRlsGuard } from "@/db/rls-guard";
 import { withTenant } from "@/data/tenant";
 import { withWorker } from "@/jobs/context";
-import { requestIdFor } from "@/server/api";
+import { hasNul, requestIdFor } from "@/server/api";
 import { AppError } from "@/lib/errors";
 import { addMember, connect, makeOrg, makeUser } from "./helpers";
 
@@ -56,5 +56,21 @@ describe("request ids", () => {
 
   it("generates a unique id when none is supplied", () => {
     expect(requestIdFor(req())).not.toBe(requestIdFor(req()));
+  });
+});
+
+describe("NUL characters are rejected at the boundary (PostgreSQL cannot store them)", () => {
+  it("finds a NUL anywhere in a JSON value: strings, keys, arrays, deep nesting", () => {
+    expect(hasNul("a\u0000b")).toBe(true);
+    expect(hasNul({ title: "ok", nested: { list: ["fine", "x\u0000"] } })).toBe(true);
+    expect(hasNul({ ["k\u0000ey"]: 1 })).toBe(true);
+    let deep: unknown = "\u0000";
+    for (let i = 0; i < 50_000; i++) deep = [deep];
+    expect(hasNul(deep)).toBe(true); // iterative: no stack overflow on hostile nesting
+  });
+  it("leaves ordinary text alone, including unicode, emoji and control characters other than NUL", () => {
+    expect(hasNul({ a: "สวัสดี 🌏\n\t\u0001", b: [1, true, null, { c: "x" }] })).toBe(false);
+    expect(hasNul(42)).toBe(false);
+    expect(hasNul(null)).toBe(false);
   });
 });

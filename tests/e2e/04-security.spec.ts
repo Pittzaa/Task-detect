@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { PASSWORD, login, attemptLogin, register, state, totpFromUri, useEnglish, alerts } from "./helpers";
+import { PASSWORD, login, attemptLogin, register, state, totpFromUri, preferEnglish, alerts } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
-test.beforeEach(async ({ page }) => { await useEnglish(page); });
+test.beforeEach(async ({ page }) => { await preferEnglish(page); });
 
 const ORIGIN = "http://localhost:3100";
 const acme = () => state().acme.orgId;

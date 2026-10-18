@@ -16,6 +16,32 @@ const GROUPS: Record<string, string[]> = {
   "Audit": ["audit_logs"],
 };
 
+const ERD_INTRO = `# Entity-relationship diagram
+
+The diagrams below are **generated from a migrated database** (\`pnpm docs:erd\`), so they show the real schema, not a design intent. Source of truth: \`src/db/schema.ts\` and \`drizzle/*.sql\`.
+
+## Conventions
+
+* **Tenancy:** every tenant table has \`org_id\`, and foreign keys between tenant tables are *composite* on (org_id, id) (the \`org_id\` half is omitted from the relationship lines), so a row can never reference another organization's row.
+* **Row-level security:** every tenant table has RLS enabled and forced, keyed to the transaction-local \`app.org_id\` setting. Tables without RLS: \`users\` and the Better Auth tables (\`auth_*\`), plus the rate-limit counters.
+* **Soft delete:** tasks, comments, attachments, saved views, recurrence series, integration destinations, projects, teams, departments, organizations and users carry \`deleted_at\`; purge rules are in [RETENTION.md](RETENTION.md).
+* **Append-only:** \`audit_logs\` and \`task_activity\`.
+* **Idempotency keys:** \`jobs.dedupe_key\`, \`notifications(user_id, dedupe_key)\`, \`tasks(series_id, occurrence_date)\` (live rows), \`calendar_event_links(connection_id, task_id)\`.
+* **Scoped roles:** \`role_assignments\` has exactly one of \`department_id\`/\`team_id\`/\`project_id\` (or none for organization scope), each a composite foreign key.
+* **Types:** Mermaid has no enum type; PostgreSQL enums (status, priority, job status, locale, …) appear under their type name.
+
+## Where things are
+
+| Area | Tables |
+|---|---|
+| Identity and tenancy | users, organizations, memberships, invitations, roles, role_permissions, role_assignments |
+| Authentication | auth_sessions, auth_accounts, auth_verifications, auth_two_factor, auth_rate_limits, app_rate_limits, oauth_states |
+| Structure | departments, teams, projects, project_teams |
+| Work | tasks, task_assignees, task_dependencies, labels, task_labels, comments, comment_mentions, task_activity, attachments, recurrence_series, custom_field_defs, custom_field_values, saved_views |
+| Notifications and integrations | notifications, notification_settings, notification_prefs, delivery_attempts, digest_log, outbox_events, jobs, integration_destinations, calendar_connections, calendar_event_links |
+| Audit | audit_logs |
+`;
+
 const mermaidType = (t: string) => t.replace(/ /g, "_").replace(/[()]/g, "");
 
 async function main() {
@@ -75,7 +101,9 @@ async function main() {
     for (const f of fks) if (inGroup.has(f.child) && !inGroup.has(f.parent)) external.add(`${f.child} → ${f.parent}`);
     if (external.size) out.push(`Cross-group references: ${[...external].map((e) => `\`${e}\``).join(", ")}.`, "");
   }
-  writeFileSync("docs/generated/erd.md", out.join("\n"));
-  console.log(`wrote docs/generated/erd.md (${byTable.size} tables, ${fks.length} foreign keys)`);
+  const diagram = out.join("\n");
+  writeFileSync("docs/generated/erd.md", diagram);
+  writeFileSync("docs/ERD.md", `${ERD_INTRO}\n${diagram}\n`);
+  console.log(`wrote docs/generated/erd.md and docs/ERD.md (${byTable.size} tables, ${fks.length} foreign keys)`);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

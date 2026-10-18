@@ -8,9 +8,10 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { withTenant } from "@/data/tenant";
 import { uploadAttachment, deleteAttachment } from "@/data/attachments";
 import { createField } from "@/data/custom-fields";
-import { addComment, addDependency, createLabel, createTask, deleteTask, setAssignees, setTaskCustomValues, setTaskLabels } from "@/data/tasks";
+import { addComment, addDependency, createLabel, createTask, deleteComment, deleteTask, setAssignees, setTaskCustomValues, setTaskLabels } from "@/data/tasks";
+import { createDestination, deleteDestination } from "@/data/integrations";
 import {
-  attachments, auditLogs, jobs, notifications, oauthStates, outboxEvents, taskActivity, tasks, authSessions,
+  attachments, auditLogs, comments, integrationDestinations, jobs, notifications, oauthStates, outboxEvents, taskActivity, tasks, authSessions,
 } from "@/db/schema";
 import { createFsStore } from "@/integrations/storage/fs";
 import { retentionPurge, storageOrphans } from "@/jobs/handlers/retention";
@@ -18,7 +19,7 @@ import { registry } from "@/jobs/registry";
 import { tick } from "@/jobs/tick";
 import type { JobRow } from "@/jobs/queue";
 import { addMember, connect, makeOrg, makeUser } from "./helpers";
-import { makeJobCtx } from "./jobs-helpers";
+import { KEY, makeJobCtx } from "./jobs-helpers";
 
 const c = connect();
 afterAll(() => c.close());
@@ -238,6 +239,32 @@ describe("attachments", () => {
     await storageOrphans(ctx, JOB);
     expect(await store.get(xRow!.key)).not.toBeNull();
     expect(await store.get(xOrphan)).toBeNull();
+  });
+});
+
+describe("deleted comments and integration destinations", () => {
+  it("a deleted comment's text is purged after 30 days (not before); a deleted webhook's secret is destroyed immediately and its row purged later", async () => {
+    const t = await mk("Comment host");
+    const old = await run("admin", (s) => addComment(s, t.id, { body: "old secret remark", mentionUserIds: [u.member!.id] }));
+    const recent = await run("admin", (s) => addComment(s, t.id, { body: "recent remark" }));
+    await run("admin", (s) => deleteComment(s, old.id));
+    await run("admin", (s) => deleteComment(s, recent.id));
+    await c.admin.update(comments).set({ deletedAt: ago(31) }).where(eq(comments.id, old.id));
+    await c.admin.update(comments).set({ deletedAt: ago(3) }).where(eq(comments.id, recent.id));
+
+    const deps = { encryptionKeys: [KEY] };
+    const dest = await run("admin", (s) => createDestination(s, deps, { name: "Gone", webhookUrl: `https://discord.com/api/webhooks/123456789012345678/${"Z".repeat(40)}`, projectId: O.project.id, events: ["task.assigned"] }));
+    await run("admin", (s) => deleteDestination(s, dest.id));
+    const [afterDelete] = await c.admin.select({ c: integrationDestinations.webhookCiphertext }).from(integrationDestinations).where(eq(integrationDestinations.id, dest.id));
+    expect(afterDelete!.c).toBe("destroyed"); // the secret does not wait for the retention period
+    await c.admin.update(integrationDestinations).set({ deletedAt: ago(40) }).where(eq(integrationDestinations.id, dest.id));
+
+    await retentionPurge(ctx, JOB);
+
+    const left = (await c.admin.select({ id: comments.id }).from(comments).where(inArray(comments.id, [old.id, recent.id]))).map((r) => r.id);
+    expect(left).toEqual([recent.id]);
+    expect(await count("comment_mentions", `comment_id = '${old.id}'`)).toBe(0);
+    expect(await count("integration_destinations", `id = '${dest.id}'`)).toBe(0);
   });
 });
 

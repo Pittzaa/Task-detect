@@ -106,9 +106,12 @@ export async function rotateDestination(s: TenantSession, deps: SecretDeps, id: 
   await s.tx.insert(auditLogs).values({ orgId: s.orgId, actorUserId: s.userId, action: "integration.rotate", targetType: "destination", targetId: id });
 }
 
+/** Stored in place of the encrypted webhook URL when a destination is deleted: the secret is gone immediately, not after the retention period. */
+const DESTROYED_SECRET = "destroyed";
+
 export async function deleteDestination(s: TenantSession, id: string) {
   s.require("org.manage_integrations");
-  const res = await s.tx.update(integrationDestinations).set({ deletedAt: new Date(), enabled: false }).where(and(eq(integrationDestinations.orgId, s.orgId), eq(integrationDestinations.id, id), isNull(integrationDestinations.deletedAt))).returning({ id: integrationDestinations.id });
+  const res = await s.tx.update(integrationDestinations).set({ deletedAt: new Date(), enabled: false, webhookCiphertext: DESTROYED_SECRET }).where(and(eq(integrationDestinations.orgId, s.orgId), eq(integrationDestinations.id, id), isNull(integrationDestinations.deletedAt))).returning({ id: integrationDestinations.id });
   if (!res[0]) throw notFound();
   await s.tx.insert(auditLogs).values({ orgId: s.orgId, actorUserId: s.userId, action: "integration.delete", targetType: "destination", targetId: id });
 }

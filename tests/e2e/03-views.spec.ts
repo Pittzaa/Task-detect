@@ -1,9 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { login, mails, state, useEnglish } from "./helpers";
+import { login, mails, state, preferEnglish } from "./helpers";
 
 /** Runs after 01 and 02 (same database, same users). Test data is created through the API, then checked through the UI. */
 test.describe.configure({ mode: "serial" });
-test.beforeEach(async ({ page }) => { await useEnglish(page); });
+test.beforeEach(async ({ page }) => { await preferEnglish(page); });
 
 const acme = () => state().acme.orgId;
 const ORIGIN = "http://localhost:3100";

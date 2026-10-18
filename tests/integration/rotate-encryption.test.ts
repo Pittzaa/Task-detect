@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { withTenant } from "@/data/tenant";
-import { createDestination } from "@/data/integrations";
+import { createDestination, deleteDestination } from "@/data/integrations";
 import { calendarConnections, integrationDestinations } from "@/db/schema";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { rotateEncryptionKey } from "@/ops/rotate-encryption";
@@ -51,6 +51,13 @@ describe("encryption key rotation", () => {
     const again = await rotateEncryptionKey(c.app, [NEW, OLD], { orgId: O.org.id });
     expect(again.destinations + again.calendarConnections).toBe(0);
     expect(again.alreadyCurrent).toBeGreaterThanOrEqual(2);
+  });
+
+  it("ignores deleted destinations (their secret is already destroyed) instead of reporting them as failures", async () => {
+    const gone = await withTenant(c.app, { userId: admin.id, orgId: O.org.id }, (s) => createDestination(s, { encryptionKeys: [OLD] }, { name: "Gone", webhookUrl: url("G".repeat(40)), projectId: O.project.id, events: ["task.assigned"] }));
+    await withTenant(c.app, { userId: admin.id, orgId: O.org.id }, (s) => deleteDestination(s, gone.id));
+    const r = await rotateEncryptionKey(c.app, [NEW, OLD], { orgId: O.org.id });
+    expect(r.failed.filter((f) => f.kind === "destination")).toEqual([]);
   });
 
   it("never overwrites a value it cannot decrypt; it reports it", async () => {

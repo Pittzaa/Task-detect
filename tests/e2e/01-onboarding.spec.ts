@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { PASSWORD, attemptLogin, linkIn, login, mails, register, state, useEnglish, waitMail } from "./helpers";
+import { PASSWORD, attemptLogin, linkIn, login, mails, register, state, preferEnglish, waitMail } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
-test.beforeEach(async ({ page }) => { await useEnglish(page); });
+test.beforeEach(async ({ page }) => { await preferEnglish(page); });
 
 test("an unauthenticated visitor is sent to sign in and sees no data", async ({ page }) => {
   await page.goto("/");
@@ -75,7 +75,7 @@ test("the administrator approves the pending member with a role", async ({ page 
   await expect(page.getByRole("cell", { name: "Sam Member" })).toBeVisible();
   // now Sam can get in
   await page.context().clearCookies();
-  await useEnglish(page);
+  await preferEnglish(page);
   await login(page, "sam@e2e.test");
   await expect(page).toHaveURL(new RegExp(`/o/${state().acme.orgId}/my-tasks`));
 });

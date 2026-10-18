@@ -2,7 +2,7 @@ import { and, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import type { Tx } from "@/db/client";
 import {
   appRateLimits, attachments, authRateLimits, authSessions, authVerifications, auditLogs, commentMentions, comments, customFieldValues, deliveryAttempts,
-  digestLog, notifications, oauthStates, organizations, savedViews, taskActivity, taskAssignees, taskDependencies, taskLabels, tasks,
+  digestLog, integrationDestinations, notifications, oauthStates, organizations, savedViews, taskActivity, taskAssignees, taskDependencies, taskLabels, tasks,
 } from "@/db/schema";
 import { cutoffDays, cutoffHours, PURGE_BATCH, RETENTION } from "@/domain/retention";
 import { errorClassOf, Deferred, type JobHandler } from "../worker";
@@ -135,9 +135,16 @@ export async function purgeOrganization(ctx: Parameters<JobHandler>[0], orgId: s
     const v = await tx.delete(savedViews).where(and(eq(savedViews.orgId, orgId), lt(savedViews.deletedAt, cutoffDays(now, RETENTION.viewTrashDays)))).returning({ id: savedViews.id });
     const nt = await tx.delete(notifications).where(and(eq(notifications.orgId, orgId), lt(notifications.createdAt, cutoffDays(now, RETENTION.notificationDays)))).returning({ id: notifications.id });
     const da = await tx.delete(deliveryAttempts).where(and(eq(deliveryAttempts.orgId, orgId), lt(deliveryAttempts.createdAt, cutoffDays(now, RETENTION.deliveryAttemptDays)))).returning({ id: deliveryAttempts.id });
+    // Individually deleted comments: mentions first (they reference the comment), then the comment text itself.
+    const oldComments = (await tx.select({ id: comments.id }).from(comments).where(and(eq(comments.orgId, orgId), lt(comments.deletedAt, cutoffDays(now, RETENTION.commentTrashDays)))).limit(PURGE_BATCH * 10)).map((c) => c.id);
+    if (oldComments.length) {
+      await tx.delete(commentMentions).where(and(eq(commentMentions.orgId, orgId), inArray(commentMentions.commentId, oldComments)));
+      await tx.delete(comments).where(and(eq(comments.orgId, orgId), inArray(comments.id, oldComments)));
+    }
+    const dests = await tx.delete(integrationDestinations).where(and(eq(integrationDestinations.orgId, orgId), lt(integrationDestinations.deletedAt, cutoffDays(now, RETENTION.destinationTrashDays)))).returning({ id: integrationDestinations.id });
     const dl = await tx.delete(digestLog).where(and(eq(digestLog.orgId, orgId), lt(digestLog.sentAt, cutoffDays(now, RETENTION.digestLogDays)))).returning({ k: digestLog.periodKey });
     counts.notifications += nt.length;
-    counts.other += v.length + da.length + dl.length;
+    counts.other += v.length + da.length + dl.length + oldComments.length + dests.length;
     const blocked = await run<{ n: string }>(tx, sql`
       select count(*)::text as n from tasks t where t.org_id = ${orgId} and t.deleted_at < ${trash.toISOString()}::timestamptz
         and exists (select 1 from calendar_event_links l where l.org_id = t.org_id and l.task_id = t.id)`);

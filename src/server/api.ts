@@ -36,6 +36,22 @@ export function assertSameOrigin(req: Request, appUrl: string) {
   if (origin !== allowed) throw new AppError("FORBIDDEN", "Cross-origin request blocked", 403);
 }
 
+/**
+ * PostgreSQL text cannot contain the NUL character, and the driver reports it as an internal error (HTTP 500). It is never
+ * legitimate input, so it is rejected at the boundary as a validation error. Iterative walk: hostile nesting cannot overflow the stack.
+ */
+export function hasNul(value: unknown): boolean {
+  const stack: unknown[] = [value];
+  while (stack.length) {
+    const v = stack.pop();
+    if (typeof v === "string") { if (v.includes("\u0000")) return true; }
+    else if (Array.isArray(v)) stack.push(...v);
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) { if (k.includes("\u0000")) return true; stack.push(x); }
+  }
+  return false;
+}
+export const NUL_MESSAGE = "Text contains an unsupported character";
+
 export async function readJson<T>(req: Request, schema: ZodType<T>): Promise<T> {
   const len = Number(req.headers.get("content-length") ?? 0);
   if (len > MAX_BODY_BYTES) throw validation("Request body too large");
@@ -47,6 +63,7 @@ export async function readJson<T>(req: Request, schema: ZodType<T>): Promise<T> 
   } catch {
     throw validation("Invalid JSON");
   }
+  if (hasNul(raw)) throw validation(NUL_MESSAGE);
   return schema.parse(raw);
 }
 
@@ -99,6 +116,7 @@ async function handleInner(req: Request, fn: (c: ApiContext) => Promise<unknown>
     assertSameOrigin(req, rt.appUrl);
     const session = await rt.auth.api.getSession({ headers: req.headers });
     if (!session) throw unauthenticated();
+    if (/%00/i.test(req.url) || req.url.includes("\u0000")) throw validation(NUL_MESSAGE);
     const u = session.user as unknown as ApiUser;
     if (opts.limit) await consumeRateLimit(rt.db, `${opts.limit.name}:${u.id}`, opts.limit.windowSeconds, opts.limit.max);
     const user: ApiUser = { id: u.id, email: u.email, emailVerified: u.emailVerified, name: u.name, locale: u.locale ?? "th", timezone: u.timezone ?? "Asia/Bangkok" };

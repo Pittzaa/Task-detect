@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { login, state, useEnglish } from "./helpers";
+import { login, state, preferEnglish } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
-test.beforeEach(async ({ page }) => { await useEnglish(page); });
+test.beforeEach(async ({ page }) => { await preferEnglish(page); });
 
 const acme = () => state().acme.orgId;
 const CRON = "e2e-cron-secret-123456";

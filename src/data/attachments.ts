@@ -12,7 +12,8 @@ import { loadTask } from "./tasks";
 import type { TenantSession } from "./tenant";
 
 export async function uploadAttachment(s: TenantSession, store: ObjectStore, taskId: string, file: { name: string; bytes: Uint8Array }) {
-  const { task, scope } = await loadTask(s, taskId);
+  // The task row is locked so concurrent uploads count and insert one at a time (otherwise several could pass the cap check together).
+  const { task, scope } = await loadTask(s, taskId, { forUpdate: true });
   if (!can(s.principal, "task.attach", scope)) throw forbidden({ permission: "task.attach" });
   await consumeRateLimit(s.tx as unknown as Db, `upload:${s.userId}`, 60, 20);
 

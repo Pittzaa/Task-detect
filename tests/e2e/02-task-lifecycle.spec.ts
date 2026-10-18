@@ -1,12 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
-import { login, state, useEnglish, alerts } from "./helpers";
+import { login, state, preferEnglish, alerts } from "./helpers";
 
 /**
  * Real browser, real server, real database. Runs after 01-onboarding (the administrator and the viewer Sam exist).
  * Everything the user sees is asserted through accessible roles and labels, never CSS classes.
  */
 test.describe.configure({ mode: "serial" });
-test.beforeEach(async ({ page }) => { await useEnglish(page); });
+test.beforeEach(async ({ page }) => { await preferEnglish(page); });
 
 const acme = () => state().acme.orgId;
 // 1x1 transparent PNG
