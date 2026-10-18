@@ -121,7 +121,7 @@ export function createAuth(deps: AuthDeps) {
             try {
               await auditAuthEvent(db, session.userId, "auth.login");
             } catch (e) {
-              logger.error({ err: describeError(e) }, "failed to audit login");
+              logger.error({ error: describeError(e) }, "failed to audit login");
             }
           },
         },

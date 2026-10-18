@@ -38,8 +38,9 @@ const PROJECTS = 20, TEAMS = 5, LABELS = 30;
 const OUT_DIR = ".data/load";
 
 const url = (user?: string, pass?: string) => { const u = new URL(ADMIN_BASE); u.pathname = `/${DB}`; if (user) { u.username = user; u.password = pass ?? ""; } return u.toString(); };
-const md5uuid = (s: string) => { const h = createHash("md5").update(s).digest("hex"); return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`; };
-const orgIds = Array.from({ length: ORGS }, () => randomUUID());
+// Deterministic, valid version-4-shaped UUIDs (Better Auth validates ids; a raw md5 is not a valid UUID). Must match pg_temp.id() in seed().
+const md5uuid = (s: string) => { const h = createHash("md5").update(s).digest("hex"); return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20)}`; };
+let orgIds: string[] = Array.from({ length: ORGS }, () => randomUUID());
 
 // ---------------------------------------------------------------------------------------------
 // Database
@@ -68,48 +69,50 @@ async function seed() {
   await c.connect();
   const t0 = Date.now();
   try {
+    await c.query(`create function pg_temp.id(text) returns uuid language sql immutable as $$ select (substr(h, 1, 12) || '4' || substr(h, 14, 3) || '8' || substr(h, 18, 15))::uuid from (select md5($1) as h) s $$`);
     const role = Object.fromEntries((await c.query("select key, id from roles where org_id is null")).rows.map((r) => [r.key, r.id as string]));
     for (let o = 0; o < ORGS; o++) {
       const org = orgIds[o]!;
-      const q = (text: string, params: unknown[] = []) => c.query(text, [org, ...params]);
+      // The organization id is a generated UUID, so it is embedded as a literal (a bound parameter would have to be both uuid and text).
+      const q = (text: string, params: unknown[] = []) => c.query(text.replaceAll("$1", `'${org}'`).replace(/\$(\d+)/g, (_m, d: string) => `$${Number(d) - 1}`), params);
       await q("insert into organizations (id, name, slug) values ($1, $2, $3)", [`Load Org ${o + 1}`, `load-${o + 1}`]);
-      await q("insert into departments (id, org_id, name) values (md5($1||'d')::uuid, $1, 'Dept')");
-      await q(`insert into teams (id, org_id, department_id, name) select md5($1||'t'||g)::uuid, $1, md5($1||'d')::uuid, 'Team '||g from generate_series(1, ${TEAMS}) g`);
-      await q(`insert into projects (id, org_id, name) select md5($1||'p'||g)::uuid, $1, 'Project '||g from generate_series(1, ${PROJECTS}) g`);
-      await q(`insert into project_teams (org_id, project_id, team_id) select $1, md5($1||'p'||g)::uuid, md5($1||'t'||(1 + g % ${TEAMS}))::uuid from generate_series(1, ${PROJECTS}) g`);
-      await q(`insert into project_teams (org_id, project_id, team_id) select $1, md5($1||'p'||g)::uuid, md5($1||'t'||(1 + (g + 1) % ${TEAMS}))::uuid from generate_series(1, ${PROJECTS}) g`);
-      await q(`insert into labels (id, org_id, name) select md5($1||'l'||g)::uuid, $1, 'label-'||g from generate_series(1, ${LABELS}) g`);
+      await q("insert into departments (id, org_id, name) values (pg_temp.id($1||'d'), $1, 'Dept')");
+      await q(`insert into teams (id, org_id, department_id, name) select pg_temp.id($1||'t'||g), $1, pg_temp.id($1||'d'), 'Team '||g from generate_series(1, ${TEAMS}) g`);
+      await q(`insert into projects (id, org_id, name) select pg_temp.id($1||'p'||g), $1, 'Project '||g from generate_series(1, ${PROJECTS}) g`);
+      await q(`insert into project_teams (org_id, project_id, team_id) select $1, pg_temp.id($1||'p'||g), pg_temp.id($1||'t'||(1 + g % ${TEAMS})) from generate_series(1, ${PROJECTS}) g`);
+      await q(`insert into project_teams (org_id, project_id, team_id) select $1, pg_temp.id($1||'p'||g), pg_temp.id($1||'t'||(1 + (g + 1) % ${TEAMS})) from generate_series(1, ${PROJECTS}) g`);
+      await q(`insert into labels (id, org_id, name) select pg_temp.id($1||'l'||g), $1, 'label-'||g from generate_series(1, ${LABELS}) g`);
 
-      await q(`insert into users (id, email, name, email_verified) select md5($1||'u'||g)::uuid, 'load-${o + 1}-'||g||'@load.test', 'User '||g||' ' || (array['Somchai','Suda','Anan','Mali','Prasert'])[1 + g % 5], true from generate_series(1, ${USERS}) g`);
-      await q(`insert into auth_accounts (account_id, provider_id, user_id, password) select md5($1||'u'||g)::text, 'credential', md5($1||'u'||g)::uuid, $2 from generate_series(1, ${USERS}) g`, [hash]);
-      await q(`insert into memberships (id, org_id, user_id, status, approved_at) select md5($1||'m'||g)::uuid, $1, md5($1||'u'||g)::uuid, 'approved', now() from generate_series(1, ${USERS}) g`);
+      await q(`insert into users (id, email, name, email_verified) select pg_temp.id($1||'u'||g), 'load-${o + 1}-'||g||'@load.test', 'User '||g||' ' || (array['Somchai','Suda','Anan','Mali','Prasert'])[1 + g % 5], true from generate_series(1, ${USERS}) g`);
+      await q(`insert into auth_accounts (account_id, provider_id, user_id, password) select pg_temp.id($1||'u'||g)::text, 'credential', pg_temp.id($1||'u'||g), $2 from generate_series(1, ${USERS}) g`, [hash]);
+      await q(`insert into memberships (id, org_id, user_id, status, approved_at) select pg_temp.id($1||'m'||g), $1, pg_temp.id($1||'u'||g), 'approved', now() from generate_series(1, ${USERS}) g`);
       const orgwide = Math.floor(USERS * 0.7), teamwide = Math.floor(USERS * 0.9);
-      await q(`insert into role_assignments (org_id, membership_id, role_id, scope_type) values ($1, md5($1||'m1')::uuid, $2, 'organization')`, [role.orgadmin]);
-      await q(`insert into role_assignments (org_id, membership_id, role_id, scope_type) select $1, md5($1||'m'||g)::uuid, $2, 'organization' from generate_series(2, ${orgwide}) g`, [role.member]);
-      await q(`insert into role_assignments (org_id, membership_id, role_id, scope_type, team_id) select $1, md5($1||'m'||g)::uuid, $2, 'team', md5($1||'t'||(1 + g % ${TEAMS}))::uuid from generate_series(${orgwide + 1}, ${teamwide}) g`, [role.member]);
-      await q(`insert into role_assignments (org_id, membership_id, role_id, scope_type, project_id) select $1, md5($1||'m'||g)::uuid, $2, 'project', md5($1||'p'||(1 + g % ${PROJECTS}))::uuid from generate_series(${teamwide + 1}, ${USERS}) g`, [role.viewer]);
+      await q(`insert into role_assignments (org_id, membership_id, role_id, scope_type) values ($1, pg_temp.id($1||'m1'), $2, 'organization')`, [role.orgadmin]);
+      await q(`insert into role_assignments (org_id, membership_id, role_id, scope_type) select $1, pg_temp.id($1||'m'||g), $2, 'organization' from generate_series(2, ${orgwide}) g`, [role.member]);
+      await q(`insert into role_assignments (org_id, membership_id, role_id, scope_type, team_id) select $1, pg_temp.id($1||'m'||g), $2, 'team', pg_temp.id($1||'t'||(1 + g % ${TEAMS})) from generate_series(${orgwide + 1}, ${teamwide}) g`, [role.member]);
+      await q(`insert into role_assignments (org_id, membership_id, role_id, scope_type, project_id) select $1, pg_temp.id($1||'m'||g), $2, 'project', pg_temp.id($1||'p'||(1 + g % ${PROJECTS})) from generate_series(${teamwide + 1}, ${USERS}) g`, [role.viewer]);
 
       const roots = `n % 7 <> 0 or n + 20 > ${TASKS}`;
       const cols = `id, org_id, project_id, parent_id, title, description, status, priority, start_date, due_date, completed_at, primary_assignee_id, created_by, created_at, updated_at`;
-      const body = (parent: string) => `select md5($1||'k'||n)::uuid, $1, md5($1||'p'||(1 + n % ${PROJECTS}))::uuid, ${parent},
+      const body = (parent: string) => `select pg_temp.id($1||'k'||n), $1, pg_temp.id($1||'p'||(1 + n % ${PROJECTS})), ${parent},
           'Task '||n||' '||(array['design','review','deploy','เอกสาร','ประชุม','report','bug','สรุปงาน'])[1 + n % 8],
           repeat('Lorem ipsum dolor sit amet. ', 6),
           (array['todo','todo','todo','progress','progress','review','done','done','done','cancelled'])[1 + n % 10]::task_status,
           (array['low','medium','medium','high','urgent'])[1 + n % 5]::task_priority,
           current_date + ((n % 120) - 60 - (n % 10)), current_date + ((n % 120) - 60),
           case when n % 10 in (6, 7, 8) then now() - make_interval(days => n % 30) end,
-          md5($1||'u'||(1 + n % ${USERS}))::uuid, md5($1||'u'||(1 + (n * 7) % ${USERS}))::uuid,
+          pg_temp.id($1||'u'||(1 + n % ${USERS})), pg_temp.id($1||'u'||(1 + (n * 7) % ${USERS})),
           now() - make_interval(mins => ${TASKS} - n), now() - make_interval(mins => (${TASKS} - n) / 2)
         from generate_series(1, ${TASKS}) n`;
       await q(`insert into tasks (${cols}) ${body("null::uuid")} where ${roots}`);
-      await q(`insert into tasks (${cols}) ${body("md5($1||'k'||(n + 20))::uuid")} where not (${roots})`);
-      await q(`insert into task_assignees (org_id, task_id, user_id) select $1, md5($1||'k'||n)::uuid, md5($1||'u'||(1 + (n * 11) % ${USERS}))::uuid from generate_series(1, ${TASKS}) n where n % 3 = 0 and (1 + (n * 11) % ${USERS}) <> (1 + n % ${USERS})`);
-      await q(`insert into task_labels (org_id, task_id, label_id) select $1, md5($1||'k'||n)::uuid, md5($1||'l'||(1 + n % ${LABELS}))::uuid from generate_series(1, ${TASKS}) n where n % 3 = 0`);
-      await q(`insert into task_dependencies (org_id, task_id, depends_on_id) select $1, md5($1||'k'||n)::uuid, md5($1||'k'||(n + 1))::uuid from generate_series(50, ${TASKS - 1}, 50) n`);
-      await q(`insert into comments (org_id, task_id, author_id, body) select $1, md5($1||'k'||n)::uuid, md5($1||'u'||(1 + (n + c) % ${USERS}))::uuid, 'Comment '||c||' on task '||n||' — looks good, please review.' from generate_series(1, ${TASKS}) n, generate_series(1, 3) c where n % 3 = 0`);
-      await q(`insert into task_activity (org_id, task_id, actor_id, type) select $1, md5($1||'k'||n)::uuid, md5($1||'u'||(1 + n % ${USERS}))::uuid, 'created' from generate_series(1, ${TASKS}) n where n % 2 = 0`);
-      await q(`insert into audit_logs (org_id, actor_user_id, action, target_type, target_id) select $1, md5($1||'u'||(1 + n % ${USERS}))::uuid, 'task.create', 'task', md5($1||'k'||(1 + n % ${TASKS}))::uuid from generate_series(1, ${Math.floor(TASKS * 1.25)}) n`);
-      await q(`insert into notifications (org_id, user_id, type, task_id, dedupe_key, read_at) select $1, md5($1||'u'||u)::uuid, 'task.assigned', md5($1||'k'||(1 + (u * 31 + g * 17) % ${TASKS}))::uuid, 'seed-'||g, case when g % 4 = 0 then now() end from generate_series(1, ${USERS}) u, generate_series(1, 200) g`);
+      await q(`insert into tasks (${cols}) ${body("pg_temp.id($1||'k'||(n + 20))")} where not (${roots})`);
+      await q(`insert into task_assignees (org_id, task_id, user_id) select $1, pg_temp.id($1||'k'||n), pg_temp.id($1||'u'||(1 + (n * 11) % ${USERS})) from generate_series(1, ${TASKS}) n where n % 3 = 0 and (1 + (n * 11) % ${USERS}) <> (1 + n % ${USERS})`);
+      await q(`insert into task_labels (org_id, task_id, label_id) select $1, pg_temp.id($1||'k'||n), pg_temp.id($1||'l'||(1 + n % ${LABELS})) from generate_series(1, ${TASKS}) n where n % 3 = 0`);
+      await q(`insert into task_dependencies (org_id, task_id, depends_on_id) select $1, pg_temp.id($1||'k'||n), pg_temp.id($1||'k'||(n + 1)) from generate_series(50, ${TASKS - 1}, 50) n`);
+      await q(`insert into comments (org_id, task_id, author_id, body) select $1, pg_temp.id($1||'k'||n), pg_temp.id($1||'u'||(1 + (n + c) % ${USERS})), 'Comment '||c||' on task '||n||' — looks good, please review.' from generate_series(1, ${TASKS}) n, generate_series(1, 3) c where n % 3 = 0`);
+      await q(`insert into task_activity (org_id, task_id, actor_id, type) select $1, pg_temp.id($1||'k'||n), pg_temp.id($1||'u'||(1 + n % ${USERS})), 'created' from generate_series(1, ${TASKS}) n where n % 2 = 0`);
+      await q(`insert into audit_logs (org_id, actor_user_id, action, target_type, target_id) select $1, pg_temp.id($1||'u'||(1 + n % ${USERS})), 'task.create', 'task', pg_temp.id($1||'k'||(1 + n % ${TASKS})) from generate_series(1, ${Math.floor(TASKS * 1.25)}) n`);
+      await q(`insert into notifications (org_id, user_id, type, task_id, dedupe_key, read_at) select $1, pg_temp.id($1||'u'||u), 'task.assigned', pg_temp.id($1||'k'||(1 + (u * 31 + g * 17) % ${TASKS})), 'seed-'||g, case when g % 4 = 0 then now() end from generate_series(1, ${USERS}) u, generate_series(1, 200) g`);
       console.log(`  seeded organization ${o + 1}/${ORGS}`);
     }
     await c.query("analyze");
@@ -230,6 +233,15 @@ function report(level: number, samples: Sample[], seconds: number) {
 
 async function main() {
   if (!values["skip-seed"]) { console.log("building the database …"); await build(); console.log("seeding …"); await seed(); }
+  else {
+    // reuse: the organizations were given random ids by the earlier run; read them back (slugs are load-1, load-2, …)
+    const c = new pg.Client({ connectionString: url() });
+    await c.connect();
+    const rows = (await c.query("select id, slug from organizations where slug like 'load-%' order by slug")).rows as { id: string; slug: string }[];
+    await c.end();
+    if (!rows.length) throw new Error("--skip-seed needs the database of an earlier run");
+    orgIds = rows.slice(0, ORGS).map((r) => r.id);
+  }
   console.log("starting the server …");
   const server = await startServer();
   const results = [];

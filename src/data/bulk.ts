@@ -48,7 +48,7 @@ export async function bulkUpdate(s: TenantSession, input: { taskIds: string[]; a
       if (e instanceof AppError && ["NOT_FOUND", "FORBIDDEN", "VALIDATION", "CONFLICT"].includes(e.code)) {
         byId.set(taskId, { taskId, ok: false, code: e.code as "NOT_FOUND" | "FORBIDDEN" | "VALIDATION" | "CONFLICT" });
       } else {
-        logger.error({ err: describeError(e) }, "bulk item failed");
+        logger.error({ error: describeError(e) }, "bulk item failed");
         byId.set(taskId, { taskId, ok: false, code: "ERROR" });
       }
     }

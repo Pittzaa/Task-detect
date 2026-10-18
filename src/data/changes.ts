@@ -26,21 +26,24 @@ const stamp = (d: Date | string | null | undefined) => (d ? new Date(d).getTime(
  */
 export async function changeSignal(s: TenantSession, o: { taskId?: string } = {}): Promise<ChangeSignal> {
   const readable = await accessibleProjectIds(s, "task.read");
-  let taskPart: unknown[] = [0, 0, 0];
+  // Every way the visible set can change touches `updated_at` (create, edit, move, assign, label, delete, restore) or changes which projects
+  // are readable, so the newest `updated_at` plus the readable-project list is enough, and the (org_id, updated_at) index makes it O(log n).
+  let newest = 0;
   if (readable === "all" || readable.length) {
     const [row] = await s.tx
-      .select({ n: sql<number>`count(*)::int`, updated: sql<Date | null>`max(${tasks.updatedAt})`, deleted: sql<Date | null>`max(${tasks.deletedAt})`, open: sql<number>`count(*) filter (where ${tasks.deletedAt} is null)::int` })
+      .select({ updated: sql<Date | null>`max(${tasks.updatedAt})` })
       .from(tasks)
       .where(and(eq(tasks.orgId, s.orgId), readable === "all" ? undefined : inArray(tasks.projectId, readable)));
-    taskPart = [row?.n ?? 0, row?.open ?? 0, stamp(row?.updated), stamp(row?.deleted)];
+    newest = stamp(row?.updated);
   }
+  const access = readable === "all" ? "all" : [...readable].sort();
 
   const [nrow] = await s.tx
     .select({ n: sql<number>`count(*)::int`, unread: sql<number>`count(*) filter (where ${notifications.readAt} is null)::int`, created: sql<Date | null>`max(${notifications.createdAt})`, read: sql<Date | null>`max(${notifications.readAt})` })
     .from(notifications)
     .where(and(eq(notifications.orgId, s.orgId), eq(notifications.userId, s.userId)));
 
-  const out: ChangeSignal = { tasks: token("t", taskPart), notifications: token("n", nrow?.n ?? 0, nrow?.unread ?? 0, stamp(nrow?.created), stamp(nrow?.read)) };
+  const out: ChangeSignal = { tasks: token("t", access, newest), notifications: token("n", nrow?.n ?? 0, nrow?.unread ?? 0, stamp(nrow?.created), stamp(nrow?.read)) };
 
   if (o.taskId) {
     const { task } = await loadTask(s, o.taskId); // NOT_FOUND unless the caller can read it

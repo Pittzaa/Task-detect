@@ -13,7 +13,7 @@ describe("describeError", () => {
     expect(text).not.toContain("launch codes");
     expect(text).not.toContain("ana@example.com");
     expect(safe.message).toBe("database error 23503: foreign key violation");
-    expect(safe).toMatchObject({ code: "23503", constraint: "tasks_project_fk", table: "tasks" });
+    expect(safe).toMatchObject({ name: "DatabaseError", code: "23503", constraint: "tasks_project_fk", table: "tasks" });
   });
 
   it("scrubs a parameter dump even when there is no wrapped cause", () => {
@@ -40,6 +40,13 @@ describe("describeError", () => {
     expect(describeError("secret string").message).toBe("string thrown");
     expect(describeError({ a: 1 }).name).toBe("NonError");
     expect(describeError(undefined).message).toBe("unknown");
+  });
+
+  it("names errors sensibly even when a production build has minified the class name", () => {
+    class e extends Error {}
+    expect(describeError(new e("boom")).name).toBe("Error");
+    class ValidationFailure extends Error {}
+    expect(describeError(new ValidationFailure("x")).name).toBe("ValidationFailure");
   });
 
   it("keeps only a few stack frames", () => {

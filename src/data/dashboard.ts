@@ -23,21 +23,26 @@ export async function getDashboard(s: TenantSession, opts: { today: string; time
   const weekEnd = addDays(opts.today, 6);
   const trendFrom = addDays(opts.today, -13);
 
-  const totals = (await s.tx.execute(sql`
-    select
-      count(*) filter (where t.status not in ('done','cancelled'))::int as open,
-      count(*) filter (where t.status not in ('done','cancelled') and t.due_date < ${opts.today})::int as overdue,
-      count(*) filter (where t.status not in ('done','cancelled') and t.due_date between ${opts.today} and ${weekEnd})::int as due_this_week,
-      count(*) filter (where t.status = 'done' and (t.completed_at at time zone ${opts.timezone})::date >= ${addDays(opts.today, -6)})::int as done_last_7,
-      count(*) filter (where t.status not in ('done','cancelled') and (t.primary_assignee_id = ${s.userId} or exists (select 1 from task_assignees a where a.task_id = t.id and a.org_id = t.org_id and a.user_id = ${s.userId})))::int as mine_open,
-      count(*) filter (where t.status not in ('done','cancelled') and t.due_date < ${opts.today} and (t.primary_assignee_id = ${s.userId} or exists (select 1 from task_assignees a where a.task_id = t.id and a.org_id = t.org_id and a.user_id = ${s.userId})))::int as mine_overdue
-    from tasks t where ${base}`)) as unknown as Rows<Record<string, number>>;
-  const byStatus = (await s.tx.execute(sql`select t.status::text as k, count(*)::int as n from tasks t where ${base} group by t.status`)) as unknown as Rows<{ k: string; n: number }>;
-  const byPriority = (await s.tx.execute(sql`select t.priority::text as k, count(*)::int as n from tasks t where ${base} and t.status not in ('done','cancelled') group by t.priority`)) as unknown as Rows<{ k: string; n: number }>;
-  const trend = (await s.tx.execute(sql`
-    select (t.completed_at at time zone ${opts.timezone})::date::text as d, count(*)::int as n
-    from tasks t where ${base} and t.status = 'done' and (t.completed_at at time zone ${opts.timezone})::date >= ${trendFrom}
-    group by 1 order by 1`)) as unknown as Rows<{ d: string; n: number }>;
+  // One pass over the caller's tasks computes every counter (it used to be four separate scans of the same rows). The expensive per-row
+  // expressions are evaluated once in the inner query; "mine" uses an IN-subquery, which PostgreSQL runs once as a hashed set, instead of
+  // a correlated EXISTS per row (about five times faster on 20 000 tasks: tests/load notes in docs/TESTING.md).
+  const mine = sql`(t.primary_assignee_id = ${s.userId} or t.id in (select a.task_id from task_assignees a where a.org_id = ${s.orgId} and a.user_id = ${s.userId}))`;
+  const days: { date: string; count: number }[] = Array.from({ length: 14 }, (_, i) => ({ date: addDays(trendFrom, i), count: 0 }));
+  const columns = [
+    sql`count(*) filter (where open)::int as open`,
+    sql`count(*) filter (where open and due_date < ${opts.today})::int as overdue`,
+    sql`count(*) filter (where open and due_date between ${opts.today} and ${weekEnd})::int as due_this_week`,
+    sql`count(*) filter (where status = 'done' and done_day >= ${addDays(opts.today, -6)}::date)::int as done_last_7`,
+    sql`count(*) filter (where open and mine)::int as mine_open`,
+    sql`count(*) filter (where open and due_date < ${opts.today} and mine)::int as mine_overdue`,
+    ...STATUSES.map((x) => sql.raw(`count(*) filter (where status = '${x}')::int as s_${x}`)),
+    ...PRIORITIES.map((x) => sql.raw(`count(*) filter (where open and priority = '${x}')::int as p_${x}`)),
+    ...days.map((d, i) => sql`count(*) filter (where status = 'done' and done_day = ${d.date}::date)::int as d_${sql.raw(String(i))}`),
+  ];
+  const inner = sql`select t.status, t.priority, t.due_date, t.status not in ('done','cancelled') as open,
+      case when t.status = 'done' then (t.completed_at at time zone ${opts.timezone})::date end as done_day, ${mine} as mine
+    from tasks t where ${base}`;
+  const totals = (await s.tx.execute(sql`select ${sql.join(columns, sql`, `)} from (${inner}) x`)) as unknown as Rows<Record<string, number>>;
   const perProject = (await s.tx.execute(sql`
     select p.id::text as id, p.name, count(t.id)::int as total, count(t.id) filter (where t.status = 'done')::int as done
     from projects p left join tasks t on t.project_id = p.id and t.org_id = p.org_id and t.deleted_at is null
@@ -45,15 +50,11 @@ export async function getDashboard(s: TenantSession, opts: { today: string; time
     group by p.id, p.name order by p.name limit 100`)) as unknown as Rows<{ id: string; name: string; total: number; done: number }>;
 
   const t = totals.rows[0]!;
-  const days: { date: string; count: number }[] = [];
-  for (let i = 0; i < 14; i++) {
-    const date = addDays(trendFrom, i);
-    days.push({ date, count: trend.rows.find((r) => r.d === date)?.n ?? 0 });
-  }
+  days.forEach((d, i) => { d.count = t[`d_${i}`] ?? 0; });
   return {
     totals: { open: t.open!, overdue: t.overdue!, dueThisWeek: t.due_this_week!, doneLast7Days: t.done_last_7!, mineOpen: t.mine_open!, mineOverdue: t.mine_overdue! },
-    byStatus: { ...empty.byStatus, ...Object.fromEntries(byStatus.rows.map((r) => [r.k, r.n])) },
-    byPriority: { ...empty.byPriority, ...Object.fromEntries(byPriority.rows.map((r) => [r.k, r.n])) },
+    byStatus: Object.fromEntries(STATUSES.map((x) => [x, t[`s_${x}`] ?? 0])),
+    byPriority: Object.fromEntries(PRIORITIES.map((x) => [x, t[`p_${x}`] ?? 0])),
     completionTrend: days,
     projects: perProject.rows,
   };

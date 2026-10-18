@@ -382,6 +382,8 @@ export const tasks = pgTable(
     index("tasks_project_status_idx").on(t.orgId, t.projectId, t.status).where(sql`${t.deletedAt} is null`),
     index("tasks_assignee_idx").on(t.orgId, t.primaryAssigneeId, t.status).where(sql`${t.deletedAt} is null`),
     index("tasks_due_idx").on(t.orgId, t.dueDate).where(sql`${t.deletedAt} is null`),
+    // Change signals ask "what is the newest update in the projects I can read?" every few seconds per open page.
+    index("tasks_org_updated_idx").on(t.orgId, t.updatedAt.desc()),
     index("tasks_parent_idx").on(t.orgId, t.parentId),
     // Retention: finds soft-deleted rows that are due for permanent removal.
     index("tasks_trash_idx").on(t.deletedAt).where(sql`${t.deletedAt} is not null`),

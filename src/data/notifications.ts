@@ -2,7 +2,7 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { notificationPrefs, notificationSettings, notifications, users } from "@/db/schema";
 import { CHANNELS, NOTIFICATION_TYPES, defaultEnabled, isHHMM, isNotificationType, type Channel } from "@/domain/notifications";
 import { DEFAULT_LOCALE, isLocale } from "@/i18n";
-import { renderNotification } from "@/jobs/notify";
+import { renderNotifications } from "@/jobs/notify";
 import { validation } from "@/lib/errors";
 import type { TenantSession } from "./tenant";
 
@@ -25,11 +25,9 @@ export async function listNotifications(s: TenantSession, o: { unreadOnly?: bool
     .limit(limit + 1)
     .offset(Math.max(o.offset ?? 0, 0));
   const locale = await myLocale(s);
-  const items = [];
-  for (const n of rows.slice(0, limit)) {
-    const r = await renderNotification(s.tx, s.orgId, n, locale);
-    items.push({ id: n.id, type: n.type, text: r.text, taskId: r.taskId, visible: r.visible, createdAt: n.createdAt, read: !!n.readAt });
-  }
+  const page = rows.slice(0, limit);
+  const rendered = await renderNotifications(s.tx, s.orgId, page, locale);
+  const items = page.map((n, i) => ({ id: n.id, type: n.type, text: rendered[i]!.text, taskId: rendered[i]!.taskId, visible: rendered[i]!.visible, createdAt: n.createdAt, read: !!n.readAt }));
   return { items, hasMore: rows.length > limit };
 }
 

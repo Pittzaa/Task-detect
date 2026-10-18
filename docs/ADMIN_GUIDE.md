@@ -44,6 +44,10 @@ The `--slug` (the *organization code*) is what people type on **Request access**
 * A person who is the only member of an organization can erase themselves only after confirming that the organization is left without members; it then stays in the database until an operator deletes it.
 * You can **Revoke** a membership without the person erasing anything. If someone asks to be erased or to receive their data but cannot sign in, the operator runs `pnpm privacy export --email …` / `pnpm privacy erase --email … --yes` ([RETENTION.md](RETENTION.md#account-erasure)) after verifying who is asking.
 
+**Formatting in comments and descriptions.** People can use Markdown: `**bold**`, `*italic*`, `` `code` ``, `- lists`, `> quotes` and `[text](https://link)`. Links open in a new tab; a link whose visible address differs from where it goes is annotated with the real host. HTML is shown as typed (never run), images are not embedded, and headings are drawn as bold text. Plain text typed before this feature looks the same unless it contained Markdown characters such as `*text*` or a line starting with `- `.
+
+**Seeing other people's changes.** Open pages ask a cheap endpoint every ≈ 8 s whether anything they may see has changed and refresh only then (changes appear within roughly 10–20 s). It is not instant push; members, structure and settings pages refresh on their own timers or when you return to the tab.
+
 ## 4. Day-to-day task rules (what people will ask you)
 
 * Statuses: To do, In progress, In review, Done, Cancelled, Blocked. Only valid moves are offered; leaving **Done/Cancelled** needs the *reopen* permission (managers and administrators). Details: [WORKFLOW.md](WORKFLOW.md).

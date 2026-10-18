@@ -34,9 +34,10 @@ export function describeError(e: unknown): SafeError {
   if (!(e instanceof Error)) return { name: "NonError", message: typeof e === "string" ? "string thrown" : "unknown" };
   const cause = (e as { cause?: unknown }).cause;
   const src = (cause && typeof cause === "object" ? cause : e) as { code?: unknown; constraint?: unknown; table?: unknown; status?: unknown };
-  const out: SafeError = { name: e.constructor.name || e.name, message: scrub(e.message) };
+  // Production builds minify class names ("e"); fall back to the Error's own name, and name database failures as such.
+  const out: SafeError = { name: e.constructor.name.length > 2 ? e.constructor.name : e.name || "Error", message: scrub(e.message) };
   if (typeof src.code === "string") out.code = src.code.slice(0, 20);
-  if (out.code && SQLSTATE.test(out.code)) out.message = `database error ${out.code}: ${SQLSTATE_LABEL[out.code] ?? "see code"}`;
+  if (out.code && SQLSTATE.test(out.code)) { out.name = "DatabaseError"; out.message = `database error ${out.code}: ${SQLSTATE_LABEL[out.code] ?? "see code"}`; }
   else if (cause instanceof Error && /^Failed query/i.test(e.message)) out.message = "database query failed";
   if (typeof src.constraint === "string") out.constraint = src.constraint.slice(0, 80);
   if (typeof src.table === "string") out.table = src.table.slice(0, 80);
@@ -109,7 +110,7 @@ export function createReporter(o: ReporterOptions = {}) {
           headers: { "content-type": "application/x-sentry-envelope", "x-sentry-auth": `Sentry sentry_version=7, sentry_key=${target.key}, sentry_client=task-tracker/1.0` },
         });
       } catch (e) {
-        logger.warn({ err: describeError(e).name }, "error report could not be delivered");
+        logger.warn({ error: describeError(e).name }, "error report could not be delivered");
       }
     },
   };
@@ -129,7 +130,7 @@ export function setReporterForTests(r: ReturnType<typeof createReporter> | undef
  */
 export function reportError(e: unknown, ctx: ErrorContext, deferred?: (p: Promise<unknown>) => void): SafeError {
   const safe = describeError(e);
-  logger.error({ ...ctx, err: safe }, "unexpected error");
+  logger.error({ ...ctx, error: safe }, "unexpected error"); // not `err`: pino's serializer for that key expects a real Error
   const r = reporter();
   if (r.enabled) {
     const p = r.report(safe, ctx).catch(() => undefined);

@@ -1,12 +1,12 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { can } from "@/authz/evaluate";
 import type { Tx } from "@/db/client";
-import { notificationSettings, notifications, tasks, users } from "@/db/schema";
+import { notificationSettings, notifications, projects, tasks, users } from "@/db/schema";
 import { defaultEnabled, type Channel, type NotificationType } from "@/domain/notifications";
 import { DEFAULT_LOCALE, isLocale, t, type Locale } from "@/i18n";
 import { formatDate } from "@/domain/time";
-import { projectScope } from "@/data/scope";
-import { loadPrincipal } from "@/data/tenant";
+import { projectScope, projectScopes } from "@/data/scope";
+import { loadPrincipal, loadPrincipals } from "@/data/tenant";
 import { enqueue } from "./queue";
 
 type TaskRow = typeof tasks.$inferSelect;
@@ -81,40 +81,59 @@ export interface Rendered {
   title: string | null;
 }
 
-/**
- * Turns a stored notification into text for `locale`. Access is checked NOW: if the recipient has lost
- * access, or the task is gone, the result is a generic line with no title, so a stale notification can
- * never leak data.
- */
-export async function renderNotification(
-  tx: Tx,
-  orgId: string,
-  n: { userId: string; type: string; taskId: string | null; actorId: string | null; params: Record<string, string> },
-  locale: Locale,
-): Promise<Rendered> {
-  const hidden: Rendered = { text: t(locale, "notify.generic_hidden"), visible: false, taskId: null, title: null };
-  if (!n.taskId) return hidden;
-  const [task] = await tx.select().from(tasks).where(and(eq(tasks.orgId, orgId), eq(tasks.id, n.taskId)));
-  if (!task || task.deletedAt) return hidden;
-  if (!(await readersOf(tx, orgId, task, [n.userId])).has(n.userId)) return hidden;
+export interface RenderInput { userId: string; type: string; taskId: string | null; actorId: string | null; params: Record<string, string> }
 
-  const actor = n.actorId ? (await loadProfiles(tx, [n.actorId])).get(n.actorId)?.name ?? "" : "";
+function textFor(locale: Locale, n: RenderInput, task: TaskRow, actor: string): string | null {
   const p = n.params;
   const vars = { actor, task: task.title };
-  let text: string;
   switch (n.type) {
-    case "task.assigned": text = t(locale, "notify.assigned", vars); break;
-    case "task.unassigned": text = t(locale, "notify.unassigned", vars); break;
-    case "task.commented": text = t(locale, "notify.comment", vars); break;
-    case "task.mentioned": text = t(locale, "notify.mention", vars); break;
-    case "task.status_changed": text = t(locale, "notify.status", { task: task.title, status: statusLabel(locale, p.status) }); break;
-    case "task.priority_changed": text = t(locale, "notify.priority", { task: task.title, priority: priorityLabel(locale, p.priority) }); break;
-    case "task.due_soon": text = t(locale, "notify.due_soon", { task: task.title, date: p.dueDate ? formatDate(p.dueDate, locale) : "" }); break;
-    case "task.overdue": text = t(locale, "notify.overdue", { task: task.title, date: p.dueDate ? formatDate(p.dueDate, locale) : "" }); break;
-    case "task.dependency_changed": text = t(locale, "notify.dependency", { task: task.title, status: statusLabel(locale, p.status) }); break;
-    default: return hidden;
+    case "task.assigned": return t(locale, "notify.assigned", vars);
+    case "task.unassigned": return t(locale, "notify.unassigned", vars);
+    case "task.commented": return t(locale, "notify.comment", vars);
+    case "task.mentioned": return t(locale, "notify.mention", vars);
+    case "task.status_changed": return t(locale, "notify.status", { task: task.title, status: statusLabel(locale, p.status) });
+    case "task.priority_changed": return t(locale, "notify.priority", { task: task.title, priority: priorityLabel(locale, p.priority) });
+    case "task.due_soon": return t(locale, "notify.due_soon", { task: task.title, date: p.dueDate ? formatDate(p.dueDate, locale) : "" });
+    case "task.overdue": return t(locale, "notify.overdue", { task: task.title, date: p.dueDate ? formatDate(p.dueDate, locale) : "" });
+    case "task.dependency_changed": return t(locale, "notify.dependency", { task: task.title, status: statusLabel(locale, p.status) });
+    default: return null;
   }
-  return { text, visible: true, taskId: task.id, title: task.title };
+}
+
+/**
+ * Turns stored notifications into text for `locale`, in a handful of queries however many there are (tasks, project scopes,
+ * recipients' permissions and actor names are each loaded once). Access is checked NOW, per notification: if the recipient has lost
+ * access, or the task is gone, the result is a generic line with no title, so a stale notification can never leak data.
+ * The result has one entry per input, in the same order.
+ */
+export async function renderNotifications(tx: Tx, orgId: string, notes: RenderInput[], locale: Locale): Promise<Rendered[]> {
+  const hidden = (): Rendered => ({ text: t(locale, "notify.generic_hidden"), visible: false, taskId: null, title: null });
+  const taskIds = [...new Set(notes.map((n) => n.taskId).filter((x): x is string => !!x))];
+  if (!taskIds.length) return notes.map(hidden);
+
+  const taskRows = await tx.select().from(tasks).where(and(eq(tasks.orgId, orgId), inArray(tasks.id, taskIds)));
+  const byId = new Map(taskRows.filter((r) => !r.deletedAt).map((r) => [r.id, r]));
+  const projectIds = [...new Set([...byId.values()].map((r) => r.projectId))];
+  // a deleted project hides its tasks, as it does everywhere else (projectScope returns null for it)
+  const live = new Set(projectIds.length ? (await tx.select({ id: projects.id }).from(projects).where(and(eq(projects.orgId, orgId), inArray(projects.id, projectIds), isNull(projects.deletedAt)))).map((r) => r.id) : []);
+  const scopes = await projectScopes({ tx, orgId }, [...live]);
+  const principals = await loadPrincipals(tx, [...new Set(notes.map((n) => n.userId))], orgId);
+  const actors = await loadProfiles(tx, [...new Set(notes.map((n) => n.actorId).filter((x): x is string => !!x))]);
+
+  return notes.map((n) => {
+    const task = n.taskId ? byId.get(n.taskId) : undefined;
+    if (!task) return hidden();
+    const scope = scopes.get(task.projectId);
+    const principal = principals.get(n.userId);
+    if (!scope || !principal || !can(principal, "task.read", scope)) return hidden();
+    const text = textFor(locale, n, task, n.actorId ? actors.get(n.actorId)?.name ?? "" : "");
+    return text === null ? hidden() : { text, visible: true, taskId: task.id, title: task.title };
+  });
+}
+
+/** One notification; see `renderNotifications`. */
+export async function renderNotification(tx: Tx, orgId: string, n: RenderInput, locale: Locale): Promise<Rendered> {
+  return (await renderNotifications(tx, orgId, [n], locale))[0]!;
 }
 
 const statusLabel = (l: Locale, v?: string) => (v ? t(l, `status.${v}` as never) : "");

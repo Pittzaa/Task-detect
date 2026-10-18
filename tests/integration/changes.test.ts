@@ -97,6 +97,21 @@ describe("permission-aware: nobody learns about work they cannot read", () => {
     expect(await moved("admin", async () => { await run("admin", (s) => createTask(s, { projectId: P2.id, title: "Seen by admin" })); })).toContain("tasks");
   });
 
+  it("gaining or losing access to a project moves the fingerprint even when no task changed", async () => {
+    // "grower" reads project 1 only; project 1 holds the newest task of everything they will ever see, so adding project 2 (older tasks)
+    // leaves the newest update unchanged: only the readable-project list can tell the two situations apart.
+    u.grower = await makeUser(c.admin, "grower");
+    const m = await addMember(c.admin, O.org.id, u.grower.id, { role: "member", scope: { type: "project", id: O.project.id } });
+    await run("admin", (s) => createTask(s, { projectId: O.project.id, title: "Newest of all" }));
+    expect(await moved("grower", async () => {
+      await c.admin.execute(sql`insert into role_assignments (org_id, membership_id, role_id, scope_type, project_id) select ${O.org.id}, ${m.id}, role_id, 'project', ${P2.id} from role_assignments where membership_id = ${m.id} limit 1`);
+    })).toContain("tasks");
+    expect(await moved("grower", async () => { await c.admin.execute(sql`delete from role_assignments where membership_id = ${m.id} and project_id = ${P2.id}`); })).toContain("tasks");
+    // losing everything: constant from then on
+    await c.admin.execute(sql`delete from role_assignments where membership_id = ${m.id}`);
+    expect(await moved("grower", async () => { await run("admin", (s) => createTask(s, { projectId: O.project.id, title: "After the access was removed" })); })).toEqual([]);
+  });
+
   it("a member without any role gets a constant fingerprint, whatever happens", async () => {
     expect(await moved("norole", async () => { await run("admin", (s) => createTask(s, { projectId: O.project.id, title: "Not for norole" })); })).toEqual([]);
   });

@@ -544,7 +544,8 @@ export async function listTasks(s: TenantSession, f: TaskFilter = {}): Promise<{
   if (f.priority?.length) conds.push(inArray(tasks.priority, f.priority));
   if (f.assignee) {
     const uid = f.assignee === "me" ? s.userId : f.assignee;
-    conds.push(or(eq(tasks.primaryAssigneeId, uid), sql`exists (select 1 from task_assignees a where a.task_id = ${tasks.id} and a.org_id = ${tasks.orgId} and a.user_id = ${uid})`));
+    // an IN-subquery is run once as a hashed set; a correlated EXISTS would probe task_assignees once per candidate task
+    conds.push(or(eq(tasks.primaryAssigneeId, uid), sql`${tasks.id} in (select a.task_id from task_assignees a where a.org_id = ${s.orgId} and a.user_id = ${uid})`));
   }
   if (f.labelId) conds.push(sql`exists (select 1 from task_labels l where l.task_id = ${tasks.id} and l.org_id = ${tasks.orgId} and l.label_id = ${f.labelId})`);
   if (f.dueFrom) conds.push(gte(tasks.dueDate, f.dueFrom));

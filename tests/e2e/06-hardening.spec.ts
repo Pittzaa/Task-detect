@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { EXPECTED_MIGRATIONS } from "../../src/config/schema-version";
 import { login, state, preferEnglish } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
@@ -96,7 +97,7 @@ test.describe("health and traceability", () => {
     const body = (await ready.json()) as { status: string; checks: Record<string, { ok: boolean; detail?: string | number }> };
     expect(body.checks.database!.ok).toBe(true);
     expect(body.checks.rowLevelSecurity!.ok).toBe(true);
-    expect(body.checks.migrations).toMatchObject({ ok: true, detail: 13 });
+    expect(body.checks.migrations).toMatchObject({ ok: true, detail: EXPECTED_MIGRATIONS });
     expect(["ok", "degraded"]).toContain(body.status);
     expect(JSON.stringify(body)).not.toMatch(/postgres:\/\/|password|secret/i);
   });

@@ -128,7 +128,7 @@ Then walk through the manual checks, which no script can do for you:
 * [ ] Add a Discord webhook (Settings), send a test event, confirm the message and that `@everyone` in a title is **not** a mention.
 * [ ] Connect Google Calendar, give a task a due date, confirm exactly **one** event appears; change the date, confirm it moves rather than duplicates.
 * [ ] Enable two-factor, sign out and back in with the code and with a backup code.
-* [ ] If `SENTRY_DSN` is set: provoke one server error (it must be an unexpected 500, not a 4xx), for example by temporarily pointing `DATABASE_URL` at a closed port in a preview deployment, and confirm that **one redacted event** appears in the tracker with the request id from the response header. Until then the integration is unverified.
+* [ ] If `SENTRY_DSN` is set: provoke one server error (it must be an unexpected 500, not a 4xx), for example by temporarily pointing `DATABASE_URL` at a closed port in a preview deployment, and confirm that **one redacted event** appears in the tracker with the request id from the response header. The delivery code has been run against a local HTTPS stand-in for the tracker (see [TESTING.md](TESTING.md#error-reporting-checked-in-the-real-server)); until this check passes, acceptance by a **real** Sentry/GlitchTip is unverified.
 * [ ] Trigger a backup and a restore into a scratch database following [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
 
 ## 9. Go-live checklist

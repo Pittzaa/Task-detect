@@ -1,6 +1,6 @@
 # Migrations and schema changes
 
-* **Schema source of truth:** `src/db/schema.ts`. **Migrations** are versioned SQL files in `drizzle/` (committed; never edited after they have been applied anywhere). 13 exist; `src/config/schema-version.ts` must equal that number (a unit test enforces it) and `/api/health/ready` compares it with the database.
+* **Schema source of truth:** `src/db/schema.ts`. **Migrations** are versioned SQL files in `drizzle/` (committed; never edited after they have been applied anywhere). 14 exist; `src/config/schema-version.ts` must equal that number (a unit test enforces it) and `/api/health/ready` compares it with the database.
 * **Apply:** `pnpm db:migrate` with `DATABASE_URL_UNPOOLED` = the **owner’s direct** connection string. Then apply `scripts/grants.sql` (replace `{{APP_ROLE}}`) so the runtime role has least privilege. Order for a release: **migrate → grants → deploy** ([DEPLOYMENT.md](DEPLOYMENT.md) §6).
 * **Make a change:** edit `schema.ts` → `pnpm db:generate` → **read the SQL** → commit both → bump `EXPECTED_MIGRATIONS` → regenerate docs (`pnpm docs:erd`, `pnpm docs:generate`).
 * **Hand-written SQL** (RLS policies, functions, grants-like objects): `pnpm exec drizzle-kit generate --custom --name <name>`, fill the file, separate statements with `--> statement-breakpoint`. Every new tenant table needs `ENABLE` **and** `FORCE ROW LEVEL SECURITY` plus a policy; `pnpm verify:database` fails if one is missing.
@@ -26,3 +26,4 @@
 | 0010 | `retention_indexes` | Indexes the retention job relies on. |
 | 0011 | `retention_controls` | `purge_audit_logs()` (90-day floor), owner-bound audit policies, worker policy for purging the history of trashed tasks, expired OAuth states. |
 | 0012 | `bootstrap_policy` | Owner-bound policies so bootstrap and system-role sync work for a plain owner. |
+| 0013 | `task_updated_index` | `tasks (org_id, updated_at desc)`: lets the change signal find the newest update without scanning the organization's tasks. Additive, safe to apply before the code that uses it. |

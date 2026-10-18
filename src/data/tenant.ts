@@ -157,6 +157,6 @@ async function recordDenial(db: Db, auth: { userId: string; orgId: string }, per
       });
     });
   } catch (e) {
-    logger.error({ err: describeError(e) }, "failed to record authorization denial");
+    logger.error({ error: describeError(e) }, "failed to record authorization denial");
   }
 }

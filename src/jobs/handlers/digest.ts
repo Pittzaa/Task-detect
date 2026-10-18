@@ -4,7 +4,7 @@ import { digestPeriod } from "@/domain/notifications";
 import { t } from "@/i18n";
 import { logger } from "@/lib/logger";
 import { withWorker, withWorkerOrg } from "../context";
-import { loadProfiles, renderNotification } from "../notify";
+import { loadProfiles, renderNotifications } from "../notify";
 import type { JobHandler } from "../worker";
 
 /**
@@ -49,11 +49,11 @@ async function digestForUser(ctx: Parameters<JobHandler>[0], orgId: string, user
       .limit(100);
     const lines: string[] = [];
     const used: string[] = [];
-    for (const n of pending) {
-      const r = await renderNotification(tx, orgId, n, profile.locale);
+    const rendered = await renderNotifications(tx, orgId, pending, profile.locale);
+    pending.forEach((n, i) => {
       used.push(n.id);
-      if (r.visible) lines.push(`• ${r.text}`);
-    }
+      if (rendered[i]!.visible) lines.push(`• ${rendered[i]!.text}`);
+    });
     if (!lines.length) return;
 
     const periodLabel = t(profile.locale, freq === "daily" ? "digest.daily" : "digest.weekly");
