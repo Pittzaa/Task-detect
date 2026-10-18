@@ -14,7 +14,7 @@ Honest list. “Deviation” = the brief asked for something this release does n
 | 6 | Team/project “membership” tables | Modelled as **scoped role assignments** | One mechanism instead of three; semantics are in [RBAC.md](RBAC.md). A person “belongs to” a team by holding an assignment scoped to it. |
 | 7 | Drag-and-drop everywhere | Board drag-and-drop plus a status `select` on every card/row | Keyboard/touch parity. No drag-to-reschedule on the calendar/timeline. |
 | 8 | Daily automated database backups | A **verified procedure and script**, but no scheduler in the repository | Neon’s own backup features are plan-dependent and unverified; a scheduled job must be created by you ([BACKUP_RESTORE.md](BACKUP_RESTORE.md)). |
-| 9 | Backups of object storage | **Not provided** | See [BACKUP_RESTORE.md](BACKUP_RESTORE.md) §2.3. |
+| 9 | Backups of object storage | **Provided as a tool, not as a schedule:** `pnpm backup:attachments` copies every file the database references into a second store (hash-verified, incremental) and restores them. Tested with two filesystem stores, **not** with Vercel Blob; nothing runs it automatically | See [BACKUP_RESTORE.md](BACKUP_RESTORE.md) §2.3. |
 
 ## Unverified against real services (never run)
 
@@ -34,7 +34,7 @@ Use `pnpm verify:database`, `pnpm smoke`, `pnpm verify:attachments` and the manu
 * **Attachment content:** type is sniffed from bytes, but there is no malware scan and no preview/thumbnail generation.
 * **Dependency advisory (accepted):** `braces` ≤ 3.0.3 via ESLint tooling, dev-only, no patched version published ([SECURITY.md](SECURITY.md) §3).
 * **Concurrent role edits** are guarded by advisory locks for the last-administrator rule, but two administrators editing the same person’s roles at once get last-write-wins semantics on separate assignments.
-* **No “change password” screen for signed-in users** (only the e-mailed reset flow, which does sign out all other sessions). Users can change their password by requesting a reset.
+* **Change password** is on the Security page (current password required; can sign out other sessions). Tested in the integration and browser suites.
 * **Lists** are paged with `offset` capped at 10 000 rows; beyond that use filters. **Notification and permission checkboxes** wait for the server before changing state (no optimistic update), which feels slow on bad connections.
 * **Search** is substring/trigram, not linguistic: Thai word segmentation is not applied, so partial-word matches work but ranking is basic.
 * **Calendar sync** is one-way and per user; shared/team calendars, attendee invitations and time-of-day events are not supported (all-day events from dates).
