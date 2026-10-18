@@ -28,7 +28,7 @@ All against PostgreSQL 16.15 on a local cluster, Node 22.22, pnpm 10.28, Chromiu
 | `scripts/backup.sh` with encryption | dump → AES-256 → checksum → decrypt → `pg_restore --list` verified; wrong passphrase rejected; refuses a role without `BYPASSRLS` (exit 3) |
 | Mutation checks (see [TESTING.md](TESTING.md)) | 6 deliberate breakages, each caught by a test |
 
-Test inventory: 163 unit + 340 integration + 78 end-to-end = **581 automated tests**. Source ≈ 11 400 lines, tests ≈ 7 900 lines. 14 commits on the branch.
+Test inventory: 163 unit + 340 integration + 78 end-to-end = **581 automated tests**. Source ≈ 11 400 lines, tests ≈ 7 900 lines.
 
 ## 3. Acceptance checklist (brief §20)
 
