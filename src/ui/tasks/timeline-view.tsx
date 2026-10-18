@@ -4,6 +4,7 @@ import { addDays, diffDays } from "@/domain/time";
 import { api } from "../api";
 import { Btn, Empty, ErrorNote, Loading } from "../components";
 import { useQuery } from "../hooks";
+import { useChangeSignal } from "../signals";
 import { useI18n } from "../i18n";
 import { useOrg } from "../org";
 import type { Filters, TaskSummary } from "./model";
@@ -27,7 +28,8 @@ export function TimelineView({ filters, onOpen, version }: { filters: Filters; o
   const dayPx = zoom === "week" ? 22 : 5;
   const from = anchor, to = addDays(anchor, span);
   const qs = new URLSearchParams({ from, to, ...(filters.project ? { projectId: filters.project } : {}), ...(filters.assignee ? { assignee: filters.assignee } : {}) }).toString();
-  const q = useQuery<Resp>(`tl:${orgId}:${qs}:${version}`, () => api<Resp>(`/api/orgs/${orgId}/timeline?${qs}`), { refreshMs: 60_000 });
+  const sig = useChangeSignal(orgId);
+  const q = useQuery<Resp>(`tl:${orgId}:${qs}:${version}`, () => api<Resp>(`/api/orgs/${orgId}/timeline?${qs}`), { signal: sig.tasks, refreshMs: 300_000 });
 
   const rows = useMemo(() => {
     const items = q.data?.items ?? [];

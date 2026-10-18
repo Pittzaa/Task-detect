@@ -1,6 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 3100;
+// One browser per run: the specs share one database and run in order, so engines cannot run side by side. Run the suite once per engine
+// (scripts/e2e-browsers.sh does this). Only Chromium has ever been run for this project; Firefox and WebKit are configured, not verified.
+const BROWSER = (process.env.E2E_BROWSER ?? "chromium") as "chromium" | "firefox" | "webkit";
+const DEVICE = { chromium: devices["Desktop Chrome"], firefox: devices["Desktop Firefox"], webkit: devices["Desktop Safari"] }[BROWSER];
+if (!DEVICE) throw new Error(`E2E_BROWSER must be chromium, firefox or webkit (got "${BROWSER}")`);
 const DB = process.env.E2E_APP_DATABASE_URL ?? "postgres://tt_app_e2e:app@127.0.0.1:54329/tasktracker_e2e";
 
 export default defineConfig({
@@ -16,8 +21,9 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM ?? "/opt/pw-browsers/chromium", args: ["--no-sandbox"] },
-    ...devices["Desktop Chrome"],
+    // the sandbox image ships its own Chromium; Firefox and WebKit use the engines installed by `playwright install`
+    launchOptions: BROWSER === "chromium" ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM ?? "/opt/pw-browsers/chromium", args: ["--no-sandbox"] } : {},
+    ...DEVICE,
     viewport: { width: 1280, height: 900 },
   },
   webServer: {

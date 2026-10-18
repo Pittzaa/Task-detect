@@ -4,6 +4,7 @@ import { addDays, weekdayOf } from "@/domain/time";
 import { api } from "../api";
 import { Btn, ErrorNote, Loading } from "../components";
 import { useQuery } from "../hooks";
+import { useChangeSignal } from "../signals";
 import { useI18n } from "../i18n";
 import { useOrg } from "../org";
 import { toApiQuery, type Filters, type TaskSummary } from "./model";
@@ -25,7 +26,8 @@ export function CalendarView({ filters, onOpen, version }: { filters: Filters; o
   const gridEnd = days[41]!;
 
   const qs = toApiQuery({ ...filters, dueFrom: undefined, dueTo: undefined }, { rangeFrom: gridStart, rangeTo: gridEnd, limit: 100, sort: "due" });
-  const q = useQuery<{ items: TaskSummary[] }>(`cal:${orgId}:${qs}:${version}`, () => api(`/api/orgs/${orgId}/tasks?${qs}`), { refreshMs: 60_000 });
+  const sig = useChangeSignal(orgId);
+  const q = useQuery<{ items: TaskSummary[] }>(`cal:${orgId}:${qs}:${version}`, () => api(`/api/orgs/${orgId}/tasks?${qs}`), { signal: sig.tasks, refreshMs: 300_000 });
 
   const byDay = new Map<string, TaskSummary[]>();
   for (const task of q.data?.items ?? []) {

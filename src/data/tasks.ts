@@ -286,6 +286,11 @@ export async function setAssignees(s: TenantSession, taskId: string, input: { pr
 // dependencies
 // ---------------------------------------------------------------------------------------------
 
+/** Marks the task as changed (list views show its labels and dependency count, and change signals watch `updated_at`). */
+async function touch(s: TenantSession, taskId: string) {
+  await s.tx.update(tasks).set({ updatedAt: new Date(), updatedBy: s.userId }).where(and(eq(tasks.orgId, s.orgId), eq(tasks.id, taskId)));
+}
+
 export async function addDependency(s: TenantSession, taskId: string, prerequisiteId: string) {
   if (taskId === prerequisiteId) throw validation("val.dependency_cycle");
   const { task, scope } = await loadTask(s, taskId, { forUpdate: true });
@@ -306,6 +311,7 @@ export async function addDependency(s: TenantSession, taskId: string, prerequisi
 
   const ins = await s.tx.insert(taskDependencies).values({ orgId: s.orgId, taskId: task.id, dependsOnId: prereq.id, createdBy: s.userId }).onConflictDoNothing().returning({ t: taskDependencies.taskId });
   if (!ins[0]) return; // already present
+  await touch(s, task.id);
   await activity(s, task.id, "dependency_added", { prerequisite: prereq.id });
   await audit(s, "task.dependency_add", task.id, { prerequisite: prereq.id });
 }
@@ -315,6 +321,7 @@ export async function removeDependency(s: TenantSession, taskId: string, prerequ
   need(s, "task.manage_dependencies", scope);
   const del = await s.tx.delete(taskDependencies).where(and(eq(taskDependencies.orgId, s.orgId), eq(taskDependencies.taskId, task.id), eq(taskDependencies.dependsOnId, prerequisiteId))).returning({ t: taskDependencies.taskId });
   if (!del[0]) throw notFound();
+  await touch(s, task.id);
   await activity(s, task.id, "dependency_removed", { prerequisite: prerequisiteId });
   await audit(s, "task.dependency_remove", task.id, { prerequisite: prerequisiteId });
 }
@@ -454,6 +461,7 @@ export async function setTaskLabels(s: TenantSession, taskId: string, labelIds: 
   if (sameSet(current, ids)) return;
   await s.tx.delete(taskLabels).where(and(eq(taskLabels.orgId, s.orgId), eq(taskLabels.taskId, task.id)));
   if (ids.length) await s.tx.insert(taskLabels).values(ids.map((labelId) => ({ orgId: s.orgId, taskId: task.id, labelId })));
+  await touch(s, task.id);
   await activity(s, task.id, "labels_changed", { count: ids.length });
 }
 

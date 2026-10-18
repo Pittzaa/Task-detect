@@ -3,10 +3,12 @@ import { useEffect, useMemo, useState } from "react";
 import { TASK_PRIORITIES, allowedTransitions, type TaskPriority, type TaskStatus } from "@/domain/workflow";
 import { MAX_UPLOAD_BYTES } from "@/domain/files";
 import { uploadLargeFile } from "./upload-large";
+import { Markdown } from "../markdown";
 import { allMessages } from "@/i18n";
 import { api, ApiError } from "../api";
 import { Btn, Drawer, Empty, ErrorNote, Field, Loading, Notice, PriorityBadge, StatusBadge, useToast } from "../components";
 import { useQuery } from "../hooks";
+import { useChangeSignal } from "../signals";
 import { useI18n } from "../i18n";
 import { useOrg } from "../org";
 import type { Label, Person } from "./shared";
@@ -46,7 +48,8 @@ function DrawerBody({ task, reload, onClose, onOpen }: { task: Detail; reload: (
   const people = useQuery<{ people: Person[] }>(`people:${orgId}:${task.projectId}`, () => api(`/api/orgs/${orgId}/projects/${task.projectId}/people`));
   const labels = useQuery<{ labels: Label[] }>(`labels:${orgId}`, () => api(`/api/orgs/${orgId}/labels`));
   const fields = useQuery<{ fields: FieldDef[] }>(`fields:${orgId}`, () => api(`/api/orgs/${orgId}/custom-fields`));
-  const comments = useQuery<{ comments: Comment[] }>(`comments:${task.id}`, () => api(`/api/orgs/${orgId}/tasks/${task.id}/comments`), { refreshMs: 20_000 });
+  const sig = useChangeSignal(orgId, task.id);
+  const comments = useQuery<{ comments: Comment[] }>(`comments:${task.id}`, () => api(`/api/orgs/${orgId}/tasks/${task.id}/comments`), { signal: sig.comments, refreshMs: 120_000 });
   const activity = useQuery<{ activity: Activity[] }>(`activity:${task.id}:${task.version}`, () => api(`/api/orgs/${orgId}/tasks/${task.id}/activity?limit=30`));
   const files = useQuery<{ attachments: Attachment[]; limits?: { serverMaxBytes: number; directMaxBytes: number | null } }>(`files:${task.id}`, () => api(`/api/orgs/${orgId}/tasks/${task.id}/attachments`));
   const nameOf = useMemo(() => new Map((people.data?.people ?? []).map((x) => [x.id, x.name])), [people.data]);
@@ -93,7 +96,22 @@ function DrawerBody({ task, reload, onClose, onOpen }: { task: Detail; reload: (
 
       <form onSubmit={save} className="card" aria-label={t("ui.edit")}>
         <Field label={t("ui.title")}>{(id) => <input id={id} required maxLength={300} value={form.title} disabled={!p.update} onChange={(e) => setForm({ ...form, title: e.target.value })} style={{ width: "100%" }} />}</Field>
-        <Field label={t("ui.description")}>{(id) => <textarea id={id} value={form.description} disabled={!p.update} maxLength={20000} onChange={(e) => setForm({ ...form, description: e.target.value })} />}</Field>
+        {p.update ? (
+          <>
+            <Field label={t("ui.description")} hint={t("ui.markdown_hint")}>{(id, d) => <textarea id={id} aria-describedby={d} value={form.description} maxLength={20000} onChange={(e) => setForm({ ...form, description: e.target.value })} />}</Field>
+            {form.description.trim() && (
+              <details style={{ marginBottom: "0.85rem" }}>
+                <summary>{t("ui.preview")}</summary>
+                <Markdown source={form.description} newTabLabel={t("ui.new_tab")} />
+              </details>
+            )}
+          </>
+        ) : (
+          <div className="field">
+            <span className="label" id="desc-label">{t("ui.description")}</span>
+            <div role="group" aria-labelledby="desc-label">{task.description.trim() ? <Markdown source={task.description} newTabLabel={t("ui.new_tab")} /> : <span className="muted">—</span>}</div>
+          </div>
+        )}
         <div className="grid cols-2">
           <Field label={t("ui.priority")}>{(id) => (
             <select id={id} value={form.priority} disabled={!p.update} onChange={(e) => setForm({ ...form, priority: e.target.value as TaskPriority })}>{TASK_PRIORITIES.map((x) => <option key={x} value={x}>{t(`priority.${x}` as never)}</option>)}</select>
@@ -207,7 +225,7 @@ function DrawerBody({ task, reload, onClose, onOpen }: { task: Detail; reload: (
           {comments.data?.comments.map((c) => (
             <li key={c.id} style={{ padding: "0.5rem 0", borderBottom: "1px solid var(--border)" }}>
               <strong>{c.authorName}</strong> <span className="muted small">{instant(c.createdAt)}</span>
-              <div className="pre-wrap">{c.body}</div>
+              <Markdown source={c.body} newTabLabel={t("ui.new_tab")} />
             </li>
           ))}
         </ul>
@@ -326,7 +344,8 @@ function CommentBox({ people, onPost }: { people: Person[]; onPost: (body: strin
   return (
     <form style={{ marginTop: "0.75rem" }} onSubmit={async (e) => { e.preventDefault(); if (!body.trim()) return; setBusy(true); await onPost(body.trim(), mentions); setBody(""); setMentions([]); setBusy(false); }}>
       <label className="sr-only" htmlFor="comment">{t("ui.comments")}</label>
-      <textarea id="comment" value={body} placeholder={t("ui.comment_placeholder")} onChange={(e) => setBody(e.target.value)} maxLength={10000} />
+      <textarea id="comment" aria-describedby="comment-hint" value={body} placeholder={t("ui.comment_placeholder")} onChange={(e) => setBody(e.target.value)} maxLength={10000} />
+      <p id="comment-hint" className="hint">{t("ui.markdown_hint")}</p>
       <div className="row between">
         <label className="row"><span className="sr-only">{t("ui.mention")}</span>
           <select value="" onChange={(e) => { const x = people.find((pp) => pp.id === e.target.value); if (x) { setBody((b) => `${b}${b && !b.endsWith(" ") ? " " : ""}@${x.name} `); setMentions((m) => [...new Set([...m, x.id])]); } }}>

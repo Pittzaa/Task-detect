@@ -4,6 +4,7 @@ import { TASK_STATUSES, type TaskStatus } from "@/domain/workflow";
 import { api } from "../api";
 import { Empty, ErrorNote, Loading, PriorityBadge } from "../components";
 import { useQuery } from "../hooks";
+import { useChangeSignal } from "../signals";
 import { useI18n } from "../i18n";
 import { useOrg } from "../org";
 import { isOverdue, toApiQuery, type Filters, type TaskSummary } from "./model";
@@ -17,7 +18,8 @@ export function BoardView({ filters, onOpen, version, onChanged }: { filters: Fi
   const { orgId } = useOrg();
   const { t, date } = useI18n();
   const today = useToday();
-  const q = useQuery<{ items: TaskSummary[]; hasMore: boolean }>(`board:${orgId}:${toApiQuery(filters)}:${version}`, () => api(`/api/orgs/${orgId}/tasks?${toApiQuery(filters, { limit: 100, sort: filters.sort ?? "priority" })}`), { refreshMs: 30_000 });
+  const sig = useChangeSignal(orgId);
+  const q = useQuery<{ items: TaskSummary[]; hasMore: boolean }>(`board:${orgId}:${toApiQuery(filters)}:${version}`, () => api(`/api/orgs/${orgId}/tasks?${toApiQuery(filters, { limit: 100, sort: filters.sort ?? "priority" })}`), { signal: sig.tasks, refreshMs: 300_000 });
   const { change, busy } = useStatusChange(onChanged);
   const [over, setOver] = useState<TaskStatus | null>(null);
   if (q.loading && !q.data) return <Loading />;

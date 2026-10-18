@@ -29,15 +29,27 @@ async function setContext(tx: Tx, userId: string, orgId: string | null) {
 }
 
 export async function loadPrincipal(tx: Tx, userId: string, orgId: string): Promise<Principal | null> {
-  const [m] = await tx
-    .select({ id: memberships.id, status: memberships.status })
+  return (await loadPrincipals(tx, [userId], orgId)).get(userId) ?? null;
+}
+
+/**
+ * Principals of many users of one organization in three queries (memberships, assignments, role permissions) instead of three per user.
+ * Users without a membership are absent from the result.
+ */
+export async function loadPrincipals(tx: Tx, userIds: string[], orgId: string): Promise<Map<string, Principal>> {
+  const out = new Map<string, Principal>();
+  const ids = [...new Set(userIds)];
+  if (!ids.length) return out;
+  const ms = await tx
+    .select({ id: memberships.id, userId: memberships.userId, status: memberships.status })
     .from(memberships)
-    .where(and(eq(memberships.orgId, orgId), eq(memberships.userId, userId)));
-  if (!m) return null;
+    .where(and(eq(memberships.orgId, orgId), inArray(memberships.userId, ids)));
+  if (!ms.length) return out;
 
   const rows = await tx
     .select({
       id: roleAssignments.id,
+      membershipId: roleAssignments.membershipId,
       scopeType: roleAssignments.scopeType,
       departmentId: roleAssignments.departmentId,
       teamId: roleAssignments.teamId,
@@ -45,7 +57,7 @@ export async function loadPrincipal(tx: Tx, userId: string, orgId: string): Prom
       roleId: roleAssignments.roleId,
     })
     .from(roleAssignments)
-    .where(and(eq(roleAssignments.orgId, orgId), eq(roleAssignments.membershipId, m.id)));
+    .where(and(eq(roleAssignments.orgId, orgId), inArray(roleAssignments.membershipId, ms.map((m) => m.id))));
 
   const roleIds = [...new Set(rows.map((r) => r.roleId))];
   const perms = roleIds.length
@@ -57,14 +69,19 @@ export async function loadPrincipal(tx: Tx, userId: string, orgId: string): Prom
     (byRole.get(p.roleId) ?? byRole.set(p.roleId, new Set()).get(p.roleId)!).add(p.permission);
   }
 
-  const assignments: ResolvedAssignment[] = rows.map((r) => ({
-    scopeType: r.scopeType,
-    departmentId: r.departmentId,
-    teamId: r.teamId,
-    projectId: r.projectId,
-    permissions: byRole.get(r.roleId) ?? new Set<Permission>(),
-  }));
-  return { userId, orgId, membershipStatus: m.status, assignments };
+  for (const m of ms) {
+    const assignments: ResolvedAssignment[] = rows
+      .filter((r) => r.membershipId === m.id)
+      .map((r) => ({
+        scopeType: r.scopeType,
+        departmentId: r.departmentId,
+        teamId: r.teamId,
+        projectId: r.projectId,
+        permissions: byRole.get(r.roleId) ?? new Set<Permission>(),
+      }));
+    out.set(m.userId, { userId: m.userId, orgId, membershipStatus: m.status, assignments });
+  }
+  return out;
 }
 
 /**

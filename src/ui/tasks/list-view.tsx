@@ -4,6 +4,7 @@ import { TASK_PRIORITIES, TASK_STATUSES, type TaskPriority, type TaskStatus } fr
 import { api, ApiError } from "../api";
 import { Btn, Empty, ErrorNote, Loading, Notice, PriorityBadge, StatusBadge, TableWrap, useToast } from "../components";
 import { useQuery } from "../hooks";
+import { useChangeSignal } from "../signals";
 import { useI18n } from "../i18n";
 import { useOrg } from "../org";
 import { isOverdue, toApiQuery, type Filters, type TaskSummary } from "./model";
@@ -18,7 +19,8 @@ export function ListView({ filters, projects, onOpen, version, onChanged }: { fi
   const toast = useToast();
   const today = useToday();
   const query = toApiQuery(filters);
-  const q = useQuery<Page>(`list:${orgId}:${query}:${version}`, () => api<Page>(`/api/orgs/${orgId}/tasks?${toApiQuery(filters, { limit: 50 })}`), { refreshMs: 60_000 });
+  const sig = useChangeSignal(orgId);
+  const q = useQuery<Page>(`list:${orgId}:${query}:${version}`, () => api<Page>(`/api/orgs/${orgId}/tasks?${toApiQuery(filters, { limit: 50 })}`), { signal: sig.tasks, refreshMs: 300_000 });
   const { change, busy } = useStatusChange(onChanged);
   // Extra pages ("load more") are tied to the first-page response they extend; a refresh drops them.
   const [more, setMore] = useState<{ base: Page; items: TaskSummary[]; hasMore: boolean }>();

@@ -149,3 +149,16 @@ tr.clickable:hover { background: var(--surface-2); }
 .pre-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 .bell { position: relative; }
 .bell .count { position: absolute; top: -4px; right: -4px; background: var(--danger); color: #fff; border-radius: 999px; font-size: 0.7rem; padding: 0 0.35rem; min-width: 1.1rem; text-align: center; }
+
+/* Markdown rendered from comments and descriptions */
+.md { overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0.35rem 0; }
+.md ul, .md ol { margin: 0.35rem 0; padding-left: 1.4rem; }
+.md blockquote { margin: 0.4rem 0; padding: 0.1rem 0.8rem; border-left: 3px solid var(--border); color: var(--muted); }
+.md pre { margin: 0.4rem 0; padding: 0.6rem 0.75rem; background: var(--surface-2); border-radius: 6px; overflow-x: auto; max-width: 100%; }
+.md code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; background: var(--surface-2); padding: 0.05rem 0.3rem; border-radius: 4px; }
+.md pre code { background: none; padding: 0; }
+.md hr { border: 0; border-top: 1px solid var(--border); margin: 0.6rem 0; }
+.md a { text-decoration: underline; }

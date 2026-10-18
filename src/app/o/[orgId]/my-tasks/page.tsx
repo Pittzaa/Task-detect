@@ -5,6 +5,7 @@ import { addDays } from "@/domain/time";
 import { api } from "@/ui/api";
 import { Empty, ErrorNote, Loading, PriorityBadge } from "@/ui/components";
 import { useQuery } from "@/ui/hooks";
+import { useChangeSignal } from "@/ui/signals";
 import { useI18n } from "@/ui/i18n";
 import { useOrg } from "@/ui/org";
 import type { TaskSummary } from "@/ui/tasks/model";
@@ -21,7 +22,8 @@ function MyTasks() {
   const taskId = sp.get("task");
   const [version, setVersion] = useState(0);
   const bump = useCallback(() => setVersion((v) => v + 1), []);
-  const q = useQuery<{ items: TaskSummary[] }>(`mine:${orgId}:${version}`, () => api(`/api/orgs/${orgId}/tasks?assignee=me&status=todo,progress,review,blocked&sort=due&limit=100`), { refreshMs: 60_000 });
+  const sig = useChangeSignal(orgId);
+  const q = useQuery<{ items: TaskSummary[] }>(`mine:${orgId}:${version}`, () => api(`/api/orgs/${orgId}/tasks?assignee=me&status=todo,progress,review,blocked&sort=due&limit=100`), { signal: sig.tasks, refreshMs: 300_000 });
   const { change, busy } = useStatusChange(bump);
   const open = (id?: string) => router.replace(id ? `${pathname}?task=${id}` : pathname);
 

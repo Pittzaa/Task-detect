@@ -444,7 +444,7 @@ export const comments = pgTable(
     orgId: uuid("org_id").notNull(),
     taskId: uuid("task_id").notNull(),
     authorId: uuid("author_id").notNull().references(() => users.id),
-    // Plain text. Never rendered as HTML.
+    // Markdown source, stored as text. Rendered to React elements by src/lib/markdown.ts (never as HTML).
     body: text("body").notNull(),
     createdAt: createdAt(),
     editedAt: timestamp("edited_at", { withTimezone: true }),

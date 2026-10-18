@@ -4,6 +4,7 @@ import { TASK_PRIORITIES, TASK_STATUSES } from "@/domain/workflow";
 import { api } from "@/ui/api";
 import { ErrorNote, Loading } from "@/ui/components";
 import { useQuery } from "@/ui/hooks";
+import { useChangeSignal } from "@/ui/signals";
 import { useI18n } from "@/ui/i18n";
 import { useOrg } from "@/ui/org";
 import type { Project } from "@/ui/tasks/shared";
@@ -38,7 +39,8 @@ export default function DashboardPage() {
   const { t, date } = useI18n();
   const [project, setProject] = useState("");
   const projects = useQuery<{ projects: Project[] }>(`projects:${orgId}`, () => api(`/api/orgs/${orgId}/projects`));
-  const q = useQuery<Dash>(`dash:${orgId}:${project}`, () => api<Dash>(`/api/orgs/${orgId}/dashboard${project ? `?projectId=${project}` : ""}`), { refreshMs: 60_000 });
+  const sig = useChangeSignal(orgId);
+  const q = useQuery<Dash>(`dash:${orgId}:${project}`, () => api<Dash>(`/api/orgs/${orgId}/dashboard${project ? `?projectId=${project}` : ""}`), { signal: sig.tasks, refreshMs: 300_000 });
   if (q.loading && !q.data) return <Loading />;
   if (q.error && !q.data) return <ErrorNote error={q.error} onRetry={q.reload} />;
   const d = q.data!;

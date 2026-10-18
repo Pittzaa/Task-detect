@@ -3,7 +3,7 @@ import { can } from "@/authz/evaluate";
 import type { Permission } from "@/authz/permissions";
 import { auditLogs, memberships, organizations, users } from "@/db/schema";
 import { notFound } from "@/lib/errors";
-import { loadPrincipal, type TenantSession } from "./tenant";
+import { loadPrincipals, type TenantSession } from "./tenant";
 import { projectScope } from "./scope";
 
 const UI_FLAGS: Record<string, Permission> = {
@@ -45,12 +45,12 @@ export async function listPeople(s: TenantSession, projectId: string) {
     .where(and(eq(memberships.orgId, s.orgId), eq(memberships.status, "approved"), isNull(users.deletedAt)))
     .orderBy(asc(users.name))
     .limit(500);
-  const out: { id: string; name: string }[] = [];
-  for (const r of rows) {
-    const principal = r.id === s.userId ? s.principal : await loadPrincipal(s.tx, r.id, s.orgId);
-    if (principal && can(principal, "task.read", scope)) out.push(r);
-  }
-  return out;
+  // one batch for everybody else instead of three queries per member
+  const others = await loadPrincipals(s.tx, rows.filter((r) => r.id !== s.userId).map((r) => r.id), s.orgId);
+  return rows.filter((r) => {
+    const principal = r.id === s.userId ? s.principal : others.get(r.id);
+    return !!principal && can(principal, "task.read", scope);
+  });
 }
 
 export async function listAuditLogs(s: TenantSession, o: { action?: string; limit?: number; offset?: number } = {}) {

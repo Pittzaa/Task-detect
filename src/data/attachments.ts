@@ -51,9 +51,14 @@ async function attachmentCount(s: TenantSession, taskId: string): Promise<number
  * Called while a short-lived upload token is being issued. The token is then bound to this exact name, size limit and a generic
  * content type, so it cannot be used for anything else. The file is NOT trusted until `finalizeDirectUpload` has inspected it.
  */
-export async function authorizeDirectUpload(s: TenantSession, taskId: string, pathname: string) {
+export async function assertCanAttach(s: TenantSession, taskId: string) {
   const { task, scope } = await loadTask(s, taskId);
   if (!can(s.principal, "task.attach", scope)) throw forbidden({ permission: "task.attach" });
+  return task;
+}
+
+export async function authorizeDirectUpload(s: TenantSession, taskId: string, pathname: string) {
+  const task = await assertCanAttach(s, taskId);
   if (!isDirectUploadKey(pathname, s.orgId, task.id)) throw validation("Invalid upload path");
   await consumeRateLimit(s.tx as unknown as Db, `upload-token:${s.userId}`, 60, 20);
   if ((await attachmentCount(s, task.id)) >= MAX_ATTACHMENTS_PER_TASK) throw validation("Too many attachments on this task");

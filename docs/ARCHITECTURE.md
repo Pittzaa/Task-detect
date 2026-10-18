@@ -36,7 +36,7 @@ Jobs            src/jobs/**           claimed with FOR UPDATE SKIP LOCKED + leas
 | `src/jobs/` | Queue, worker, handlers, scheduler. |
 | `src/ops/` | Operator tools used by scripts and tests: attachment verification, key rotation. |
 | `src/server/` | HTTP plumbing: `handle()`, auth setup, runtime wiring, rate limiter, request schemas. |
-| `src/app/` + `src/ui/` | Pages and client components (client-side fetch with a small `useQuery` hook; polling is the real-time mechanism). |
+| `src/app/` + `src/ui/` | Pages and client components (client-side fetch with a small `useQuery` hook; open pages watch a cheap change signal, see below). |
 | `scripts/` | Operator CLIs: migrate, bootstrap, backup, restore drill, verify-*, smoke, rotate, generators. |
 
 ## Request lifecycle
@@ -55,11 +55,11 @@ Jobs            src/jobs/**           claimed with FOR UPDATE SKIP LOCKED + leas
 | Postgres RLS **plus** application scoping | A bug in either layer alone must not leak a tenant. The runtime role is verified not to bypass RLS. | App-only filtering. |
 | Jobs in Postgres (`jobs`, `outbox_events`), Vercel Cron only as the alarm clock | Retries, leases, dead-lettering and idempotency live in the database, so missed/duplicate cron calls are harmless and no extra provider is needed. | Inngest/QStash/Vercel Workflow (more moving parts, pricing/limits unverified). |
 | Notifications store *type + ids*, rendered on read | Access is re-checked at read time; no copy of protected text sits in the notifications table. | Pre-rendered text. |
-| Polling for “real time” | Works on serverless without long-lived connections; payloads still pass through the authorized API. SSE/WebSocket was not built. | Ably/Pusher signal channel, SSE. |
+| Change signals instead of push | Open pages poll `GET /api/orgs/:id/changes` every ≈ 8 s (visible tabs only, shared between components, exponential back-off) which returns a few opaque hashes of what the caller may read; a page re-runs its real query only when its hash moved (plus on focus and a 5-minute safety net). Works on serverless without long-lived connections; permission-aware by construction (hashes cover only readable projects, the caller's own notifications, and comments of a readable task). Changes appear within roughly 10–20 s. **This is still polling, not push.** | SSE/WebSocket or a hosted channel (Ably/Pusher) for sub-second updates; a per-project change counter (rejected: a hot row every writer must lock). |
 | One-way calendar sync with deterministic event ids | No duplicates on retry; no reading from Google means no inbound trust boundary. | Two-way sync. |
 | Soft delete → 30-day trash → purge job | Undo for humans, bounded retention for the business; see [RETENTION.md](RETENTION.md). | Immediate hard delete. |
 | Recurring tasks as ordinary tasks linked to a series (unique `(series_id, occurrence_date)`) | All views, permissions and reminders work unchanged; edits apply only to open future occurrences. | Virtual occurrences. |
-| Plain-text comments | Removes the XSS class of Markdown/HTML rendering. | Markdown (not rendered; documented deviation). |
+| Safe, tree-based Markdown for comments/descriptions | Formatting without an HTML string anywhere: parser → typed tree → React elements; no HTML passthrough, http(s) links only, no images. | A Markdown library + sanitizer (a larger attack surface to keep patched). |
 
 ## Data model
 

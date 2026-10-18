@@ -1,6 +1,6 @@
 import { handleUpload } from "@vercel/blob/client";
 import { z } from "zod";
-import { authorizeDirectUpload } from "@/data/attachments";
+import { assertCanAttach, authorizeDirectUpload } from "@/data/attachments";
 import { MAX_DIRECT_UPLOAD_BYTES } from "@/domain/files";
 import { conflict } from "@/lib/errors";
 import { handle, readJson } from "@/server/api";
@@ -24,10 +24,12 @@ const TOKEN_LIFETIME_MS = 10 * 60 * 1000;
 export const POST = (req: Request, { params }: P) =>
   handle(req, async (c) => {
     const p = await params;
+    const taskId = uuid.parse(p.taskId);
+    // who may even ask comes first (another organization's callers get "not found", whatever else is wrong with the request)
+    await c.tenant(p.orgId, (s) => assertCanAttach(s, taskId));
     const token = c.rt.blobToken;
     if (!token) throw conflict("Large uploads are not available on this deployment");
     const parsed = await readJson(req, body);
-    const taskId = uuid.parse(p.taskId);
     return handleUpload({
       token,
       request: req,

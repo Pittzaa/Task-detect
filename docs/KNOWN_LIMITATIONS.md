@@ -7,8 +7,8 @@ Honest list. “Deviation” = the brief asked for something this release does n
 | # | Brief | What was built | Why / how to close it |
 |---|---|---|---|
 | 1 | Attachments up to **25 MB** | **4 MB** through the server, **25 MB** through a direct browser → Blob upload (built, **untested against a real Blob store**), 25 files per task | The direct path is verified up to the edge of the Blob service: the token endpoint (session, permission, rate limit, name/size/type constraints, decoded and asserted) and the server-side inspection of the stored object are tested with real code; the browser → Vercel Blob request itself, the CSP entry `connect-src https://vercel.com/api/blob/` (taken from the SDK source) and private-store support for client tokens are **unverified** until you run the checklist in [DEPLOYMENT.md](DEPLOYMENT.md) §8. Without a Blob token (development) only the 4 MB path exists. |
-| 2 | Markdown in comments/descriptions | **Plain text only** (line breaks kept) | Removes an XSS class. A sanitized Markdown renderer can be added later. |
-| 3 | Real-time updates | **Polling** (notifications 30 s, comments 20 s, lists 30–60 s, plus refetch on focus) | Serverless friendly. An SSE/WebSocket signal channel (e.g. Ably/Pusher) was not built. |
+| 2 | Markdown in comments/descriptions | **A safe subset**: bold/italic/strike, code and fenced code, quotes, lists, rules, http(s) links. No HTML, tables, images, task-list checkboxes or reference links | Hand-written renderer (no HTML is ever produced). Existing plain-text comments render the same unless they contain Markdown characters (`*x*`, `# `, `- `, a bare `https://…` becomes a link). Descriptions and comments are still *stored* as typed. |
+| 3 | Real-time updates | **Change-signal polling**: an open page asks a cheap endpoint every ≈ 8 s whether anything it can see changed, and re-fetches only then (changes appear in ≈ 10–20 s; previously up to 60 s); refetch on focus; 5-minute safety-net refresh | Serverless friendly and permission-aware. **Not push**: no sub-second updates, and each open tab costs one small request per ≈ 8 s while visible (hidden tabs send nothing). Changes to members, structure, settings and attachments are not covered by the signal and show up on focus/safety-net refresh. An SSE/WebSocket channel was not built. |
 | 4 | Push notifications | Not implemented | Explicitly out of scope until later. |
 | 5 | “superadmin” | A **flag only**; grants nothing in any organization | No cross-tenant operator console exists; operators use the scripts and the database. |
 | 6 | Team/project “membership” tables | Modelled as **scoped role assignments** | One mechanism instead of three; semantics are in [RBAC.md](RBAC.md). A person “belongs to” a team by holding an assignment scoped to it. |
@@ -47,5 +47,5 @@ Use `pnpm verify:database`, `pnpm smoke`, `pnpm verify:attachments` and the manu
 2. How and where to run the daily backup and the monthly restore drill, and whether to back up Blob.
 3. Whether to keep direct-to-Blob uploads switched on after you have tried them on the real store (`DIRECT_UPLOADS=off` turns them off without a redeploy of code).
 4. A security contact address and an incident owner.
-5. Whether Markdown, real-time push of changes, and SSO/SCIM are wanted in the next release.
+5. Whether real-time push of changes (beyond the faster polling now built) and SSO/SCIM are wanted in the next release.
 6. Retention periods (30-day trash, 90-day notifications) — adjust `src/domain/retention.ts` if your policy differs.

@@ -7,11 +7,12 @@ export interface Query<T> { data: T | undefined; error: ApiError | undefined; lo
 interface State<T> { key: string | null; data?: T; error?: ApiError }
 
 /**
- * Minimal data hook: loads when `key` changes, re-fetches on window focus and optionally every `refreshMs`
- * (polling is the real-time mechanism for v1). `loading` is derived (true while the stored result belongs to a
- * different key), stale responses are ignored, and background refreshes never flash a spinner.
+ * Minimal data hook: loads when `key` changes, re-fetches on window focus, whenever `signal` changes (a change token from
+ * `useChangeSignal`: the cheap way to notice that something happened) and, as a safety net, every `refreshMs`.
+ * `loading` is derived (true while the stored result belongs to a different key), stale responses are ignored, and background
+ * refreshes never flash a spinner.
  */
-export function useQuery<T>(key: string | null, fetcher: () => Promise<T>, o: { refreshMs?: number } = {}): Query<T> {
+export function useQuery<T>(key: string | null, fetcher: () => Promise<T>, o: { refreshMs?: number; signal?: string } = {}): Query<T> {
   const [state, setState] = useState<State<T>>({ key: null });
   const seq = useRef(0);
   const fn = useRef(fetcher);
@@ -29,6 +30,12 @@ export function useQuery<T>(key: string | null, fetcher: () => Promise<T>, o: { 
   }, [key]);
 
   useEffect(() => { void load(); }, [load]);
+  const lastSignal = useRef(o.signal);
+  useEffect(() => {
+    // the first token only sets the baseline; a later, different one means something changed
+    if (o.signal && lastSignal.current && o.signal !== lastSignal.current) void load();
+    lastSignal.current = o.signal;
+  }, [o.signal, load]);
   useEffect(() => {
     if (key === null) return;
     const onFocus = () => void load();

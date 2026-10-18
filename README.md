@@ -3,7 +3,7 @@
 A multi-tenant task tracker for organizations (departments → teams → projects → tasks) on **Next.js 16 / React 19 / TypeScript**, **Neon PostgreSQL**, **Vercel** and **Resend**.
 Thai (default) and English. Strict tenant isolation (application scoping **and** PostgreSQL row-level security), scoped role-based access, workflow rules,
 List / Board / Calendar / Timeline / Dashboard / My-tasks views, search, saved views, custom fields, bulk actions, recurring tasks, notifications (in-app, e-mail, Discord),
-Google Calendar one-way sync, private attachments, 90-day audit log, durable background jobs, backups with a tested restore procedure.
+Google Calendar one-way sync, private attachments (up to 25 MB where Vercel Blob is configured), safe Markdown in comments and descriptions, 90-day audit log, durable background jobs, change-signal refresh, personal data export and account erasure, per-organization export/import, backups with a tested restore procedure, optional error reporting (Sentry protocol).
 
 > **Status: release candidate, not yet deployed anywhere.** Everything was built and tested against a local PostgreSQL 16 and a local production build.
 > Vercel, Neon, Resend, Google, Discord and Vercel Blob were **never contacted**. Read [docs/READINESS_REPORT.md](docs/READINESS_REPORT.md) (what was verified, what was not, go-live blockers)
@@ -37,7 +37,9 @@ pnpm dev                                    # http://localhost:3000   (e-mails a
 | `pnpm lint` / `pnpm typecheck` | static checks |
 | `pnpm test:unit` | pure-logic tests |
 | `pnpm test:integration` | real PostgreSQL, least-privilege role (needs `TEST_DATABASE_URL`) |
-| `pnpm test:e2e` | build + Playwright browser tests |
+| `pnpm test:e2e` | build + Playwright browser tests (Chromium) |
+| `pnpm test:e2e:browsers` | the same suite once per engine: Chromium, Firefox, WebKit (the last two need `playwright install`; **never run by the author**) |
+| `pnpm load` | load test against a production build with seeded volume (`scripts/load-test.ts`; see [docs/TESTING.md](docs/TESTING.md)) |
 | `pnpm db:generate` / `pnpm db:migrate` | create / apply migrations |
 | `pnpm bootstrap` | create an organization + first-admin invitation (operator) |
 | `pnpm verify:database` | prove the runtime role and policies on **your** database |

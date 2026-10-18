@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api } from "./api";
 import { Btn, Empty, ErrorNote, Loading } from "./components";
 import { useQuery } from "./hooks";
+import { useChangeSignal } from "./signals";
 import { useI18n } from "./i18n";
 
 interface Item { id: string; text: string; taskId: string | null; visible: boolean; read: boolean; createdAt: string }
@@ -13,7 +14,8 @@ interface Resp { items: Item[]; unread: number }
 export function NotificationBell({ orgId }: { orgId: string }) {
   const { t, instant } = useI18n();
   const [open, setOpen] = useState(false);
-  const q = useQuery<Resp>(`notif:${orgId}`, () => api<Resp>(`/api/orgs/${orgId}/notifications?limit=15`), { refreshMs: 30_000 });
+  const sig = useChangeSignal(orgId);
+  const q = useQuery<Resp>(`notif:${orgId}`, () => api<Resp>(`/api/orgs/${orgId}/notifications?limit=15`), { signal: sig.notifications, refreshMs: 120_000 });
   async function markAll() { await api(`/api/orgs/${orgId}/notifications`, { method: "POST", body: { all: true } }); q.reload(); }
   const unread = q.data?.unread ?? 0;
   return (

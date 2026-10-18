@@ -122,19 +122,55 @@ test("a task cannot start until its prerequisite is done, and circular dependenc
   await expect(d.getByText("(To do → In progress)")).toBeVisible();
 });
 
-test("comments are plain text: markup is shown literally and never executed", async ({ page }) => {
+test("comments support safe Markdown: formatting and links work, HTML and scripts are shown literally and never executed", async ({ page }) => {
   await login(page, "admin@e2e.test");
   let dialogs = 0;
   page.on("dialog", (dlg) => { dialogs++; void dlg.dismiss(); });
   await openTask(page, "Design the homepage");
   const d = drawer(page);
-  const body = `<img src=x onerror="alert(1)"> <script>alert(2)</script> **not bold**`;
+  const body = `<img src=x onerror="alert(1)"> <script>alert(2)</script> **now bold** and [the docs](https://example.com/docs) but [bad](javascript:alert(3))\n\n- first\n- second`;
   await d.getByRole("textbox", { name: "Comments" }).fill(body);
   await d.getByRole("button", { name: "Post" }).click();
-  await expect(d.getByText(body)).toBeVisible();
+  const comment = d.locator(".md", { hasText: "now bold" });
+  await expect(comment).toBeVisible();
+  // formatting is applied
+  await expect(comment.locator("strong", { hasText: "now bold" })).toHaveCount(1);
+  await expect(comment.getByRole("listitem")).toHaveText(["first", "second"]);
+  // a normal link opens safely in a new tab
+  const link = comment.getByRole("link", { name: /the docs/ });
+  await expect(link).toHaveAttribute("href", "https://example.com/docs");
+  await expect(link).toHaveAttribute("target", "_blank");
+  await expect(link).toHaveAttribute("rel", "noopener noreferrer nofollow ugc");
+  // markup is text, not elements; the unsafe link is not a link
+  await expect(comment).toContainText('<img src=x onerror="alert(1)"> <script>alert(2)</script>');
+  await expect(comment).toContainText("[bad](javascript:alert(3))");
   expect(await d.locator("img[src='x']").count()).toBe(0);
-  expect(await d.locator("strong", { hasText: "not bold" }).count()).toBe(0);
+  expect(await d.locator("a[href^='javascript' i]").count()).toBe(0);
+  expect(await d.locator(".md script").count()).toBe(0);
   expect(dialogs).toBe(0);
+});
+
+test("the description shows a Markdown preview for editors and formatted text for read-only viewers", async ({ page, browser }) => {
+  await login(page, "admin@e2e.test");
+  await openTask(page, "Design the homepage");
+  const d = drawer(page);
+  await d.getByLabel("Description").fill("Goal: **ship** the page\n\n1. draft\n2. review");
+  await d.getByText("Preview").click();
+  await expect(d.locator("details .md strong", { hasText: "ship" })).toBeVisible();
+  await expect(d.locator("details .md ol li")).toHaveCount(2);
+  await d.getByRole("form", { name: "Edit" }).getByRole("button", { name: "Save" }).click();
+  await expect(d.getByRole("form", { name: "Edit" }).getByRole("button", { name: "Save" })).toBeDisabled(); // saved: nothing left to save
+
+  // a viewer cannot edit: they get the formatted text, not a disabled text box
+  const ctx = await browser.newContext();
+  await ctx.addCookies([{ name: "tt_locale", value: "en", url: "http://localhost:3100" }]);
+  const viewer = await ctx.newPage();
+  await login(viewer, "sam@e2e.test");
+  await openTask(viewer, "Design the homepage");
+  const vd = drawer(viewer);
+  await expect(vd.locator(".md strong", { hasText: "ship" })).toBeVisible();
+  await expect(vd.getByRole("textbox", { name: "Description" })).toHaveCount(0);
+  await ctx.close();
 });
 
 test("mentioning a member adds the mention text to the comment", async ({ page }) => {

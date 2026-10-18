@@ -149,6 +149,41 @@ test("Search finds tasks and a saved view re-applies its filters", async ({ page
   await expect(page).toHaveURL(/status=progress/);
 });
 
+test("a change made by someone else appears without reloading, and idle pages poll the cheap signal, not the list", async ({ browser }) => {
+  const mk = async () => {
+    const ctx = await browser.newContext();
+    await ctx.addCookies([{ name: "tt_locale", value: "en", url: ORIGIN }]);
+    const pg = await ctx.newPage();
+    await login(pg, "admin@e2e.test");
+    return { ctx, pg };
+  };
+  const watcher = await mk();
+  const author = await mk();
+  const listRequests: string[] = [];
+  const signalRequests: string[] = [];
+  watcher.pg.on("request", (r) => {
+    const u = new URL(r.url());
+    if (u.pathname === `/api/orgs/${acme()}/tasks`) listRequests.push(u.search);
+    if (u.pathname === `/api/orgs/${acme()}/changes`) signalRequests.push(u.search);
+  });
+  await watcher.pg.goto(`/o/${acme()}/tasks`);
+  await expect(watcher.pg.getByRole("button", { name: "Backlog item", exact: true })).toBeVisible();
+  await expect.poll(() => signalRequests.length, { timeout: 15_000 }).toBeGreaterThanOrEqual(2); // baseline + at least one periodic check
+  expect(listRequests.length).toBeLessThanOrEqual(2); // the page's own load (plus at most one focus refresh): idle checks did not re-run the list
+
+  const before = Date.now();
+  const made = await post<{ id: string }>(author.pg, `/api/orgs/${acme()}/tasks`, { projectId, title: "Signal task from another browser" });
+  await expect(watcher.pg.getByRole("button", { name: "Signal task from another browser", exact: true })).toBeVisible({ timeout: 25_000 });
+  expect(Date.now() - before).toBeLessThan(25_000); // it used to take up to a minute
+  expect(listRequests.length).toBeGreaterThan(1);
+
+  // and a deletion disappears the same way
+  const del = await author.pg.request.delete(`/api/orgs/${acme()}/tasks/${made.id}`, { headers: { origin: ORIGIN } });
+  expect(del.ok()).toBe(true);
+  await expect(watcher.pg.getByRole("button", { name: "Signal task from another browser", exact: true })).toHaveCount(0, { timeout: 25_000 });
+  await watcher.ctx.close(); await author.ctx.close();
+});
+
 test("the cron endpoint refuses callers without the secret, then delivers the mention to the viewer", async ({ page, request }) => {
   const denied = await request.get("/api/cron/tick");
   expect(denied.status()).toBe(401);
