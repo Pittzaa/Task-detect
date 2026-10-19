@@ -102,7 +102,8 @@ test("switching automatic e-mail on makes the next e-mail go out by itself; the 
   const projects = (await (await page.request.get(`/api/orgs/${acme()}/projects`)).json()) as { projects: { id: string }[] };
   await sw.check();
   try {
-    await expect(section.getByText(/each e-mail is sent as soon as the background work runs/i)).toBeVisible();
+    await expect(section.getByText(/e-mails are sent without anyone pressing a button/i)).toBeVisible();
+    await expect(section.getByRole("radio", { name: /Right away/ })).toBeChecked(); // "instant" is what automatic e-mail always meant
     await page.reload();
     await expect(page.getByRole("region", { name: "Sending e-mails" }).getByRole("switch", { name: "Send notification e-mails automatically" })).toBeChecked();
     await expect(page.getByLabel("Email digest")).toBeEnabled();
@@ -130,5 +131,58 @@ test("switching automatic e-mail on makes the next e-mail go out by itself; the 
     await expect(back).not.toBeChecked();
     await page.reload();
     await expect(page.getByRole("region", { name: "Sending e-mails" }).getByRole("switch", { name: "Send notification e-mails automatically" })).not.toBeChecked();
+  }
+});
+
+test("the daily mode: an administrator chooses 'once a day at 23:00 Thai time', it is remembered, members are told, and the button sends what is held", async ({ page, browser }) => {
+  await login(page, "admin@e2e.test");
+  await page.goto(`/o/${acme()}/settings`);
+  const section = () => page.getByRole("region", { name: "Sending e-mails" });
+  const sw = () => section().getByRole("switch", { name: "Send notification e-mails automatically" });
+  // the choice of when appears only with the switch on
+  await expect(section().getByRole("radio")).toHaveCount(0);
+  await sw().check();
+  try {
+    await expect(section().getByRole("radio")).toHaveCount(2);
+    await section().getByRole("radio", { name: /Once a day at 23:00 Thai time/ }).check();
+    await expect(section().getByText(/held and go out in the run at 23:00 Thai time/)).toBeVisible();
+    await page.reload();
+    await expect(section().getByRole("radio", { name: /Once a day at 23:00 Thai time/ })).toBeChecked();
+    await expect(section().getByRole("radio", { name: /Right away/ })).not.toBeChecked();
+    await expectAccessible(page, "settings: notifications, daily e-mail mode");
+    expect((await page.request.put(`/api/orgs/${acme()}/settings`, { data: { emailSchedule: "weekly" }, headers: { origin: ORIGIN } })).status()).toBe(422);
+
+    // a member is told, and has no control
+    const ctx = await browser.newContext();
+    await ctx.addCookies([{ name: "tt_locale", value: "en", url: ORIGIN }]);
+    const samPage = await ctx.newPage();
+    await login(samPage, "sam@e2e.test");
+    await samPage.goto(`/o/${acme()}/settings`);
+    await expect(samPage.getByText(/E-mail is sent once a day, at 23:00 Thai time/)).toBeVisible();
+    await expect(samPage.getByRole("radio")).toHaveCount(0);
+    expect((await samPage.request.put(`/api/orgs/${acme()}/settings`, { data: { emailSchedule: "instant" }, headers: { origin: ORIGIN } })).status()).toBe(403);
+    await ctx.close();
+
+    // an e-mail made now: held until 23:00 Thai time unless it is already past 23:00 (and before 04:00), when it goes at once
+    const members = (await (await page.request.get(`/api/orgs/${acme()}/members`)).json()) as { members: { userId: string; email: string }[] };
+    const sam = members.members.find((m) => m.email === "sam@e2e.test")!;
+    const projects = (await (await page.request.get(`/api/orgs/${acme()}/projects`)).json()) as { projects: { id: string }[] };
+    const thaiHour = (new Date().getUTCHours() + 7) % 24;
+    const inWindow = thaiHour >= 23 || thaiHour < 4;
+    const before = mails().length;
+    expect((await post(page, `/api/orgs/${acme()}/tasks`, { projectId: projects.projects[0]!.id, title: "Daily mode task", primaryAssigneeId: sam.userId })).status()).toBe(201);
+    if (!inWindow) {
+      await expect.poll(async () => (await waiting(page)).waiting, { timeout: 45_000 }).toBeGreaterThanOrEqual(1); // held, and counted as waiting
+      expect(mails().slice(before).filter((m) => m.to === "sam@e2e.test" && m.text.includes("Daily mode task"))).toHaveLength(0);
+      await page.goto(`/o/${acme()}/settings`);
+      await section().getByRole("button", { name: "Send waiting e-mails now" }).click();
+    }
+    const mail = await waitMail("sam@e2e.test", /Daily mode task/, before);
+    expect(mail.html.startsWith("<!doctype html>")).toBe(true);
+  } finally {
+    await page.goto(`/o/${acme()}/settings`);
+    await section().getByRole("radio", { name: /Right away/ }).check().catch(() => undefined);
+    await sw().uncheck(); // the rest of the suite runs the way a new organization starts
+    await expect(sw()).not.toBeChecked();
   }
 });

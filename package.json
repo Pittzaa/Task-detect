@@ -31,6 +31,7 @@
     "backup:attachments": "tsx scripts/backup-attachments.ts",
     "verify:database": "tsx scripts/verify-database.ts",
     "smoke": "tsx scripts/smoke.ts",
+    "poller": "node scripts/poller.mjs",
     "rotate:key": "tsx scripts/rotate-encryption-key.ts",
     "docs:generate": "tsx scripts/gen-docs.ts",
     "docs:erd": "tsx scripts/gen-erd.ts"

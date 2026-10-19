@@ -38,9 +38,12 @@ export const organizations = pgTable("organizations", {
   // Notification e-mails and digests are sent by themselves. Off (the default): e-mails wait until an administrator presses "send". Turn it
   // on where something runs the background work regularly (a cron every minute on your own server, a paid Vercel plan).
   autoEmail: boolean("auto_email").notNull().default(false),
+  // When automatic e-mail is on: "instant" sends as soon as the background work runs (a server or a paid plan that runs it every minute or faster),
+  // "daily" holds the e-mails for 23:00 Thai time (a once-a-day cron such as Vercel Hobby). Ignored while auto_email is off.
+  emailSchedule: text("email_schedule").notNull().default("instant"),
   createdAt: createdAt(),
   deletedAt: deletedAt(),
-});
+}, (t) => [check("organizations_email_schedule", sql`${t.emailSchedule} in ('instant', 'daily')`)]);
 
 export const users = pgTable(
   "users",

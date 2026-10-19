@@ -7,9 +7,9 @@ Everything here was run on the release candidate; the exact results are in [READ
 ```bash
 pnpm lint                      # ESLint (React hooks rules included)
 pnpm typecheck                 # tsc --noEmit
-pnpm test:unit                 # 303 tests, no database
-TEST_DATABASE_URL=postgres://postgres@127.0.0.1:54329/tasktracker_test pnpm test:integration   # 574 tests
-pnpm test:e2e                  # builds, then 101 browser tests (Chromium) against a production build
+pnpm test:unit                 # 317 tests, no database
+TEST_DATABASE_URL=postgres://postgres@127.0.0.1:54329/tasktracker_test pnpm test:integration   # 591 tests
+pnpm test:e2e                  # builds, then 102 browser tests (Chromium) against a production build
 pnpm test:e2e:browsers         # the same suite once per engine (chromium, firefox, webkit); the last two have never been run
 pnpm load                      # load test against a production build with seeded volume (see below)
 pnpm build                     # production build
@@ -82,6 +82,8 @@ Local PostgreSQL for the tests (no Docker needed): a PostgreSQL 16 cluster on po
 | E-mail sending: queue the e-mail whatever the switch says; read the switch as always on; read it as always off; digests ignore the switch; no permission check on the switch; no permission check on "send waiting"; no 7-day window; `tick` queues kinds the request-driven runner cannot run; org import `--replace` without keeping the live switch | 7, 7, 1, 1, 3, 4, 1, 1 and 1 tests failed; `pnpm verify:database` fails (14/15) when the column grant for `auto_email` is revoked |
 | HTML e-mails and e-mail limits: back to per-task due/overdue e-mails; no recipient cap (20 an hour); reset allowed 5 times; verification allowed 9 times; no per-address invitation limit; unescaped paragraph text in the template; any URL scheme in a link; once-a-day run order (user-facing first); digest period without catch-up | 1, 1, 2, 1, 1, 1, 2, 1 and 3 tests failed |
 | Deadline e-mail: no readability check; no period claim; ignore the person's e-mail choices; ignore quiet hours; a window wider than today/tomorrow | 1, 3, 1, 1 and 3 tests failed |
+| Review fixes, each broken in turn: invitation allowance not given back after a failed send; notification allowance not given back; a digest that repeats what the deadline e-mail lists; "today" taken from the UTC date; no claim conflict check (three runs meeting at the same person); the manual job not limited to its organization; long unbroken titles not wrapped; the hourly deadline queueing removed | 1 test failed each time (the `today` change: 4) |
+| Three e-mail modes: daily e-mails not held for 23:00; deadline e-mail not limited to the window; digest not limited to the window; the button not bringing held e-mails forward; the schedule ignored by the settings route; `?fast=1` ignored by the cron route | 2, 1, 1, 1, 3 and 1 tests failed |
 | Deleting structure: no permission check on a department; team delete without the department scope; keep a team's role assignments; leave a project's tasks undeleted | 13, 1, 2 and 1 tests failed |
 
 ## Bugs the test suites found while being written (all fixed)
@@ -107,6 +109,17 @@ Throughput of the single process plateaus at **≈ 170–180 requests/s**; with 
 ## Browsers
 
 Only **Chromium** has ever run the end-to-end suite. `E2E_BROWSER=firefox|webkit` selects another engine (`playwright.config.ts`), and `pnpm test:e2e:browsers` (`scripts/e2e-browsers.sh`) runs the whole suite once per engine, each against a fresh database. They need `pnpm exec playwright install --with-deps firefox webkit`, which the sandbox this project was built in could not do; **the configuration is untested and some specs may need small adjustments** (the first run on those engines is the real test). Suggested CI (untested, copy and adapt): a job with a PostgreSQL 16 service that runs `pnpm install --frozen-lockfile`, `pnpm lint`, `pnpm typecheck`, `pnpm test:unit`, `pnpm test:integration` (with `TEST_DATABASE_URL`), then `pnpm test:e2e:browsers`.
+
+## The VPS poller (`scripts/poller.mjs`), measured on the developer's machine
+
+Setup: the production build against a local PostgreSQL 16, one organization with automatic e-mail on ("right away"), the e-mail sink in a file instead of Resend. A change is made straight through the data layer (assigning a task to someone), so **no web request asks the app to process it**, and the time until the notification e-mail lands in the sink is measured (`.data/probe/poll-latency.mts`, not in the repository).
+
+| | rounds | delivered | time until the e-mail was written |
+|---|---|---|---|
+| no poller, nobody calling the app | 3 | 0 (8 s limit each) | never: nothing runs the background work by itself |
+| poller, every second | 10 | 10 | 0.43 s to 1.06 s, median 0.80 s |
+
+The idle poller made about 3 database transactions a second and used under 1 % of one CPU. What this shows: the loop works against the real app and turns a change into an e-mail in about a second. What it does **not** show: the delay added by the real e-mail provider and the recipient's mail server (Resend was never called), behaviour on a VPS under systemd, or running for days. In real use a signed-in web request also starts the same background work (`src/jobs/kick.ts`), so changes made through the web app are processed within seconds even without a poller; the poller matters for work nobody triggers (reminders at 09:00, retries, held e-mails, digests, deadline e-mails).
 
 ## Error reporting, checked in the real server
 

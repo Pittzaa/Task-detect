@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, inArray, isNull, ne } from "drizzle-orm";
 import { digestLog, memberships, notificationPrefs, notifications, organizations, tasks } from "@/db/schema";
 import { digestPeriod, quietHoursEnd } from "@/domain/notifications";
+import { asEmailSchedule, emailRunAllowed } from "@/domain/email-schedule";
 import { addDays, todayIn } from "@/domain/time";
 import { renderEmail } from "@/integrations/email/templates";
 import { t } from "@/i18n";
@@ -16,7 +17,8 @@ import { Deferred, type JobHandler } from "../worker";
  * emailed individually is left out.
  */
 export const digestRun: JobHandler = async (ctx) => {
-  const orgs = await withWorker(ctx.db, (tx) => tx.select({ id: organizations.id }).from(organizations).where(and(isNull(organizations.deletedAt), eq(organizations.autoEmail, true))));
+  // daily mode (a once-a-day cron) serves its organizations only inside the 23:00 window, instant mode whenever this runs
+  const orgs = (await withWorker(ctx.db, (tx) => tx.select({ id: organizations.id, schedule: organizations.emailSchedule }).from(organizations).where(and(isNull(organizations.deletedAt), eq(organizations.autoEmail, true))))).filter((o) => emailRunAllowed(asEmailSchedule(o.schedule), ctx.now()));
   for (const org of orgs) {
     const prefs = await withWorkerOrg(ctx.db, org.id, (tx) => tx.select().from(notificationPrefs).where(and(eq(notificationPrefs.orgId, org.id), ne(notificationPrefs.digest, "off"))));
     for (const pref of prefs) {

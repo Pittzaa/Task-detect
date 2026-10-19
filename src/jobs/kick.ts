@@ -27,7 +27,7 @@ const state = globalThis as typeof globalThis & { __ttKick?: { last: number; run
 /**
  * Runs due background work for a bounded time. Never throws. Returns false when it did nothing (another kick ran moments ago or is still running on this instance).
  */
-export async function kick(ctx: JobContext, o: { force?: boolean } = {}): Promise<boolean> {
+export async function kick(ctx: JobContext, o: { force?: boolean; /** Width of the de-duplication bucket for "events are waiting" (default 10 s; a poller that calls every second asks for 1). */ outboxBucketSeconds?: number } = {}): Promise<boolean> {
   const s = (state.__ttKick ??= { last: 0, running: false });
   const t = Date.now();
   if (s.running || (!o.force && t - s.last < KICK_MIN_GAP_MS)) return false;
@@ -38,7 +38,7 @@ export async function kick(ctx: JobContext, o: { force?: boolean } = {}): Promis
     // A change made a moment ago should reach the other people's bells now, not at the next minute bucket of the periodic job.
     await withWorker(ctx.db, async (tx) => {
       const res = (await tx.execute(sql`select 1 as one from outbox_events where processed_at is null limit 1`)) as unknown as { rows: unknown[] };
-      if (res.rows.length) await enqueue(tx, { kind: "outbox.process", orgId: null, dedupeKey: `kick:outbox:${Math.floor(now.getTime() / 10_000)}`, runAt: now, maxAttempts: 3 });
+      if (res.rows.length) await enqueue(tx, { kind: "outbox.process", orgId: null, dedupeKey: `kick:outbox:${o.outboxBucketSeconds ?? 10}:${Math.floor(now.getTime() / ((o.outboxBucketSeconds ?? 10) * 1000))}`, runAt: now, maxAttempts: 3 });
     });
     await tick(ctx, { registry: userFacing, only: USER_FACING_KINDS, maxMs: KICK_MAX_MS });
     return true;

@@ -52,6 +52,7 @@ A production **build** that runs as `development`, `test` or `e2e` refuses to st
 | `ORG_EXPORT_PASSPHRASE` | `pnpm org export/import` | ≥ 12 characters. Encrypts/decrypts the per-organization bundle (AES-256-GCM, scrypt). Without it the file is only compressed. |
 | `BACKUP_BLOB_READ_WRITE_TOKEN` | `pnpm backup:attachments` | Token of a SECOND Blob store used as backup destination/source. Must differ from `BLOB_READ_WRITE_TOKEN`. |
 | `APP_URL` + `CRON_SECRET` | `pnpm smoke` | Where to point the post-deployment smoke test. |
+| `CRON_SECRET` (or `POLL_ENV_FILE`), `POLL_URL`, `POLL_INTERVAL_MS`, `POLL_FULL_EVERY_MS` | `scripts/poller.mjs` (README_VPS step 9b) | The poller reads `CRON_SECRET` from its environment or from a `KEY=VALUE` file (default `/etc/task-tracker/env`); `POLL_URL` defaults to `http://127.0.0.1:3000`, `POLL_INTERVAL_MS` to 1000 (at least 250), `POLL_FULL_EVERY_MS` to 60000. Not read by the application. |
 
 ## Where to set them
 

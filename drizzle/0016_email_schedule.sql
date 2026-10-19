@@ -1,0 +1,2 @@
+ALTER TABLE "organizations" ADD COLUMN "email_schedule" text DEFAULT 'instant' NOT NULL;--> statement-breakpoint
+ALTER TABLE "organizations" ADD CONSTRAINT "organizations_email_schedule" CHECK ("organizations"."email_schedule" in ('instant', 'daily'));

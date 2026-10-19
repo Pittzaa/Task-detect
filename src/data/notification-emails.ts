@@ -1,5 +1,5 @@
-import { and, asc, eq, gte, isNull, sql } from "drizzle-orm";
-import { auditLogs, notifications } from "@/db/schema";
+import { and, asc, eq, gt, gte, isNull, sql } from "drizzle-orm";
+import { auditLogs, jobs, notifications } from "@/db/schema";
 import { enqueue } from "@/jobs/queue";
 import type { TenantSession } from "./tenant";
 
@@ -22,18 +22,24 @@ const waiting = (s: TenantSession, now: Date) =>
     sql`not exists (select 1 from jobs j where j.dedupe_key = 'email:' || ${notifications.id}::text)`,
   );
 
+/** E-mails daily mode is holding for 23:00 Thai time: queued, never tried, due later. The button brings them forward. */
+const held = (s: TenantSession, now: Date) =>
+  and(eq(jobs.orgId, s.orgId), eq(jobs.kind, "notification.email"), eq(jobs.status, "pending"), eq(jobs.attempts, 0), gt(jobs.runAt, now));
+
 /**
  * How many notification e-mails are waiting for an administrator to send them (automatic e-mail is off, or older ones from before it was switched on): the recipient had e-mail
- * switched on for the event, nothing has been sent or queued yet, and it is recent. Only people who manage settings may ask.
+ * switched on for the event, nothing has been sent or queued yet, and it is recent. In daily mode this also counts the e-mails held for 23:00.
+ * Only people who manage settings may ask.
  */
 export async function waitingEmailCount(s: TenantSession, now = new Date()): Promise<number> {
   s.require("org.manage_settings");
   const [r] = await s.tx.select({ n: sql<number>`count(*)::int` }).from(notifications).where(waiting(s, now));
-  return r?.n ?? 0;
+  const [h] = await s.tx.select({ n: sql<number>`count(*)::int` }).from(jobs).where(held(s, now));
+  return (r?.n ?? 0) + (h?.n ?? 0);
 }
 
 /**
- * Queues the waiting e-mails, oldest first. Each goes through the normal delivery job, so everything is still decided at send time:
+ * Queues the waiting e-mails, oldest first, and brings forward the ones daily mode is holding for 23:00. Each goes through the normal delivery job, so everything is still decided at send time:
  * the recipient must still be a member who can read the task, the text is the current one, quiet hours are respected, and a retry never
  * sends twice (the job key is the same one automatic mode uses, so a second press queues nothing it has already queued).
  */
@@ -41,6 +47,8 @@ export async function queueWaitingEmails(s: TenantSession, now = new Date()): Pr
   s.require("org.manage_settings");
   const rows = await s.tx.select({ id: notifications.id }).from(notifications).where(waiting(s, now)).orderBy(asc(notifications.createdAt), asc(notifications.id)).limit(SEND_BATCH + 1);
   let queued = 0;
+  // what daily mode is holding for 23:00 goes now (a job that has been tried or is backing off is left to its own schedule)
+  queued += (await s.tx.update(jobs).set({ runAt: now }).where(held(s, now)).returning({ id: jobs.id })).length;
   for (const r of rows.slice(0, SEND_BATCH)) {
     const res = await enqueue(s.tx, { kind: "notification.email", orgId: s.orgId, payload: { notificationId: r.id }, dedupeKey: `email:${r.id}`, maxAttempts: 8, runAt: now });
     if (res.created) queued++;

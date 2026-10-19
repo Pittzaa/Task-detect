@@ -77,7 +77,7 @@ Downloads go through an authenticated, permission-checked route and are sent as 
 
 ### 2.8 Availability and abuse
 
-Durable Postgres job queue: leases, bounded retries with jittered back-off, dead-lettering, idempotent handlers keyed by dedupe keys, rolling-deploy safe (a worker claims only kinds it knows). Replay safety for outbox events, notifications, e-mail (idempotency key), Discord and calendar. Job health is visible in Settings and `/api/health/ready`. T `queue.test.ts` (16), `notifications.test.ts`, `reminders-digest.test.ts`.
+Durable Postgres job queue: leases, bounded retries with jittered back-off, dead-lettering, idempotent handlers keyed by dedupe keys, rolling-deploy safe (a worker claims only kinds it knows). Replay safety for outbox events, notifications, e-mail (idempotency key), Discord and calendar. Job health is visible in Settings and `/api/health/ready`. T `queue.test.ts` (16), `notifications.test.ts`, `reminders-digest.test.ts`. `GET /api/cron/tick` (and its quick pass `?fast=1`, which a server poller calls every second) accepts only `Authorization: Bearer $CRON_SECRET`, compared in constant time and never read from the query string (T `email-schedule.test.ts`); the poller therefore needs that one secret in its environment (a root-owned file the service user can read, README_VPS step 9b) and nothing else. It runs only the kinds of work people are waiting for, in a bounded time, and the same lease and de-duplication rules apply, so a poller cannot send anything twice.
 
 ## 3. Dependency and configuration review
 

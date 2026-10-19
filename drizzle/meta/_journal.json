@@ -113,6 +113,13 @@
       "when": 1792384588666,
       "tag": "0015_email_sending",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1792412320493,
+      "tag": "0016_email_schedule",
+      "breakpoints": true
     }
   ]
 }

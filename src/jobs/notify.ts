@@ -3,6 +3,7 @@ import { can } from "@/authz/evaluate";
 import type { Tx } from "@/db/client";
 import { notificationSettings, notifications, organizations, projects, tasks, users } from "@/db/schema";
 import { defaultEnabled, type Channel, type NotificationType } from "@/domain/notifications";
+import { asEmailSchedule, nextDailyEmailAt } from "@/domain/email-schedule";
 import { DEFAULT_LOCALE, isLocale, t, type Locale } from "@/i18n";
 import { formatDate } from "@/domain/time";
 import { projectScope, projectScopes } from "@/data/scope";
@@ -143,14 +144,18 @@ const priorityLabel = (l: Locale, v?: string) => (v ? t(l, `priority.${v}` as ne
 
 const COMBINED_EMAIL: ReadonlySet<NotificationType> = new Set<NotificationType>(["task.due_soon", "task.overdue"]);
 
-/** Whether the organization has switched on automatic e-mail (Settings -> Notifications). Read where the work starts, once per event or scan. */
-export async function orgAutoEmail(tx: Tx, orgId: string): Promise<boolean> {
-  const [o] = await tx.select({ auto: organizations.autoEmail }).from(organizations).where(eq(organizations.id, orgId));
-  return o?.auto === true;
+/**
+ * How the organization's e-mail goes out (Settings -> Notifications), read where the work starts, once per event or scan: `autoEmail` is the
+ * switch, and `emailAt` is when an automatic e-mail created `now` is sent (right away, or in daily mode at 23:00 Thai time).
+ */
+export async function orgEmailDelivery(tx: Tx, orgId: string, now: Date): Promise<{ autoEmail: boolean; emailAt: Date }> {
+  const [o] = await tx.select({ auto: organizations.autoEmail, schedule: organizations.emailSchedule }).from(organizations).where(eq(organizations.id, orgId));
+  const autoEmail = o?.auto === true;
+  return { autoEmail, emailAt: autoEmail && asEmailSchedule(o?.schedule) === "daily" ? nextDailyEmailAt(now) : now };
 }
 
 /**
- * Creates notifications for `userIds` about `task`. With `autoEmail` (see orgAutoEmail) it also queues the email deliveries; without it the
+ * Creates notifications for `userIds` about `task`. With `autoEmail` (see orgEmailDelivery) it also queues the email deliveries; without it the
  * e-mail is only recorded as wanted (`emailWanted`) and waits until an administrator sends the waiting e-mails
  * (src/data/notification-emails.ts). Notifications inside the app are created either way.
  * Only people who can read the task right now are notified; in-app/email switches are honoured per user.
@@ -158,7 +163,7 @@ export async function orgAutoEmail(tx: Tx, orgId: string): Promise<boolean> {
  */
 export async function deliverToUsers(
   tx: Tx,
-  o: { orgId: string; task: TaskRow; type: NotificationType; userIds: string[]; actorId?: string | null; params?: Record<string, string>; key: string; now: Date; autoEmail: boolean },
+  o: { orgId: string; task: TaskRow; type: NotificationType; userIds: string[]; actorId?: string | null; params?: Record<string, string>; key: string; now: Date; autoEmail: boolean; /** when the e-mail job may run (default: now); see orgEmailDelivery */ emailAt?: Date },
 ): Promise<number> {
   if (o.task.deletedAt) return 0;
   const candidates = [...new Set(o.userIds)].filter((u) => u !== o.actorId);
@@ -172,7 +177,7 @@ export async function deliverToUsers(
     const id = await insertNotification(tx, { orgId: o.orgId, userId, type: o.type, taskId: o.task.id, actorId: o.actorId ?? null, params: o.params, dedupeKey: o.key, inApp: inApp.has(userId), emailWanted: email.has(userId) });
     if (!id) continue;
     created++;
-    if (email.has(userId) && o.autoEmail) await enqueue(tx, { kind: "notification.email", orgId: o.orgId, payload: { notificationId: id }, dedupeKey: `email:${id}`, maxAttempts: 8, runAt: o.now });
+    if (email.has(userId) && o.autoEmail) await enqueue(tx, { kind: "notification.email", orgId: o.orgId, payload: { notificationId: id }, dedupeKey: `email:${id}`, maxAttempts: 8, runAt: o.emailAt ?? o.now });
   }
   return created;
 }

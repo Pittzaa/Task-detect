@@ -160,7 +160,7 @@ unset OWNER_PW APP_PW
 
 > * **ห้ามตั้ง `APP_ENV`** และห้ามตั้ง `NODE_ENV` เอง (`next start` ตั้ง `production` ให้) ระบบจะใช้กฎเข้มสุด และจะไม่เริ่มทำงานถ้าตั้งค่าไม่ครบ
 > * **ห้ามเปลี่ยน `BETTER_AUTH_SECRET` ทีหลัง** ไม่งั้น 2FA ของทุกคนใช้ไม่ได้ (กู้ด้วย `pnpm auth:reset-2fa`) · **ห้ามทำ `APP_ENCRYPTION_KEY` หาย** ไม่งั้นถอดรหัส webhook Discord และโทเค็น Google ที่เก็บไว้ไม่ได้
-> * **ส่งอีเมลแจ้งเตือนอัตโนมัติ:** เมื่อทำขั้นที่ 9 (cron ทุกนาที) เสร็จแล้ว ให้ล็อกอินด้วยบัญชีผู้ดูแลแล้วเปิดสวิตช์ **ตั้งค่า → การแจ้งเตือน → ส่งอีเมลแจ้งเตือนอัตโนมัติ** (ปิดอยู่ตอนเริ่มต้น: อีเมลรอให้ผู้ดูแลกดส่ง) บน VPS ไม่ต้องมีคนเข้าแอปมาปลุก เพราะ cron เรียกงานเบื้องหลังเองทุกนาที
+> * **ส่งอีเมลแจ้งเตือนอัตโนมัติ:** เมื่อทำขั้นที่ 9 (cron ทุกนาที) หรือขั้นที่ 9ข (ตัวตรวจทุกวินาที) เสร็จแล้ว ให้ล็อกอินด้วยบัญชีผู้ดูแลแล้วเปิดสวิตช์ **ตั้งค่า → การแจ้งเตือน → ส่งอีเมลแจ้งเตือนอัตโนมัติ** และเลือก **ส่งเมื่อไร → ทันที** (ปิดอยู่ตอนเริ่มต้น: อีเมลรอให้ผู้ดูแลกดส่ง) บน VPS ไม่ต้องมีคนเข้าแอปมาปลุก เพราะ cron เรียกงานเบื้องหลังเองทุกนาที
 > * ตัวแปรทั้งหมดอยู่ใน [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) · `ATTACHMENTS_DIR` ต้องเป็นพาธเต็ม และห้ามตั้งคู่กับ `BLOB_READ_WRITE_TOKEN`
 
 ## ขั้นที่ 5: สร้างตาราง, ให้สิทธิ์, สร้างองค์กรแรก
@@ -298,6 +298,47 @@ sudo -H -u tasktracker /usr/local/bin/task-tracker-tick; echo "exit=$?"
 ```
 
 (ลองกับ secret ผิดแล้ว: สคริปต์จบด้วย exit 22 และข้อความ `401` ตามที่ควร) ดูผล: `grep CRON /var/log/syslog | tail` หรือเข้าหน้า **ตั้งค่า → การเชื่อมต่อ → งานเบื้องหลัง** ในแอป ต้องไม่มีงานค้างหรือตาย
+
+## ขั้นที่ 9ข (ทางเลือก): ตรวจงานเบื้องหลังทุกวินาที
+
+cron ของเครื่องถี่สุดทุก 1 นาที ถ้าอยากให้อีเมลแจ้งเตือนออกภายในไม่กี่วินาที (โหมด **ส่งทันที**) ให้รันตัวตรวจงาน `scripts/poller.mjs` แทน cron ของขั้น 9 มันเป็นสคริปต์ Node ธรรมดา ไม่ต้องติดตั้งอะไรเพิ่ม ทำงานเป็นวง ทีละคำขอ (ไม่ซ้อนกัน): ทุก 1 วินาทีเรียก `GET /api/cron/tick?fast=1` (ทำเฉพาะสิ่งที่คนรออยู่: แจ้งเตือน อีเมล เตือนก่อนครบกำหนด งานซ้ำ) และทุก 60 วินาทีเรียกรอบเต็มเหมือน cron (อีเมลสรุป ล้างข้อมูลตามนโยบาย ฯลฯ) ถ้าเซิร์ฟเวอร์ตอบผิดพลาดหรือไม่ตอบ มันรอนานขึ้นทีละเท่าตัว (สูงสุด 30 วินาที) แล้วกลับมาที่ทุก 1 วินาทีเมื่อกลับมาปกติ
+
+```bash
+sudo tee /etc/systemd/system/task-tracker-poller.service >/dev/null <<'EOF'
+[Unit]
+Description=Task Tracker poller (background work every second)
+After=task-tracker.service
+Wants=task-tracker.service
+
+[Service]
+Type=simple
+User=tasktracker
+Group=tasktracker
+WorkingDirectory=/opt/task-tracker/app
+EnvironmentFile=/etc/task-tracker/env
+Environment=POLL_URL=http://127.0.0.1:3000
+Environment=POLL_INTERVAL_MS=1000
+ExecStart=/usr/bin/node /opt/task-tracker/app/scripts/poller.mjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo rm -f /etc/cron.d/task-tracker          # ไม่ต้องใช้ cron ของขั้น 9 คู่กัน (รันคู่กันไม่เสียหาย แต่ซ้ำซ้อน)
+sudo systemctl daemon-reload
+sudo systemctl enable --now task-tracker-poller
+sudo journalctl -u task-tracker-poller -n 5 --no-pager     # ต้องเห็น "poller: http://127.0.0.1:3000, every 1000 ms" และไม่มี error
+```
+
+ใช้ `CRON_SECRET` ตัวเดียวกับแอป (อ่านจาก `/etc/task-tracker/env`) ถ้าไม่ตรง log จะขึ้น `answered 401` ปรับความถี่ด้วย `POLL_INTERVAL_MS` (ต่ำสุด 250) แต่ละรอบเร็วใช้คำสั่งฐานข้อมูลเล็ก ๆ ไม่กี่คำสั่ง (ตรวจว่ามีเหตุการณ์ค้างไหม ลงคิวงานตามช่วงเวลา และหยิบงานที่ถึงกำหนด) ซึ่งบนเครื่องเดียวกับฐานข้อมูลเบามาก หลังติดตั้งให้เปิดสวิตช์ส่งอีเมลอัตโนมัติและเลือก **ทันที** ที่ ตั้งค่า → การแจ้งเตือน
+
+> **ทดสอบแล้ว:** ตรรกะของตัวตรวจ (ลำดับรอบเร็ว/เต็ม การรอเมื่อผิดพลาด การหยุดเมื่อถูกสั่ง) มีเทสต์หน่วย และเคยรันกับเซิร์ฟเวอร์แอปจริงในเครื่องผู้พัฒนา (ดูตัวเลขความหน่วงใน [docs/TESTING.md](docs/TESTING.md)) **ยังไม่ได้ทดสอบ:** ไฟล์ systemd ข้างบนบน VPS จริง และการรันต่อเนื่องหลายวัน
 
 ## ขั้นที่ 10: ตรวจสอบและเริ่มใช้
 

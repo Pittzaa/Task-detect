@@ -4,6 +4,7 @@ import { digestLog, notificationPrefs, organizations, projects, taskAssignees, t
 import { projectScopes } from "@/data/scope";
 import { loadPrincipals } from "@/data/tenant";
 import { digestPeriod, quietHoursEnd } from "@/domain/notifications";
+import { asEmailSchedule, emailRunAllowed } from "@/domain/email-schedule";
 import { addDays, formatDate } from "@/domain/time";
 import { renderEmail, type Section, type TaskLine } from "@/integrations/email/templates";
 import { EmailError } from "@/integrations/email";
@@ -47,9 +48,11 @@ const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T
  */
 export const deadlineEmail: JobHandler = async (ctx, job) => {
   const only = job.orgId && job.payload.manual === true ? job.orgId : null;
-  const orgs = await withWorker(ctx.db, (tx) =>
-    tx.select({ id: organizations.id }).from(organizations).where(and(isNull(organizations.deletedAt), only ? eq(organizations.id, only) : eq(organizations.autoEmail, true))),
+  const found = await withWorker(ctx.db, (tx) =>
+    tx.select({ id: organizations.id, schedule: organizations.emailSchedule }).from(organizations).where(and(isNull(organizations.deletedAt), only ? eq(organizations.id, only) : eq(organizations.autoEmail, true))),
   );
+  // the administrator's button sends now whatever the mode; otherwise an organization in daily mode is served only inside the 23:00 window
+  const orgs = found.filter((o) => only !== null || emailRunAllowed(asEmailSchedule(o.schedule), ctx.now()));
   let retry = false;
   let late = false;
   let first = true;

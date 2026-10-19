@@ -57,7 +57,7 @@ a { color: var(--primary); }
 .btn.ghost { border-color: transparent; background: transparent; }
 input, select, textarea { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.45rem 0.6rem; min-height: 38px; max-width: 100%; }
 textarea { width: 100%; min-height: 90px; resize: vertical; }
-input[type="checkbox"] { min-height: auto; width: 1.1rem; height: 1.1rem; }
+input[type="checkbox"], input[type="radio"] { min-height: auto; width: 1.1rem; height: 1.1rem; padding: 0; flex: none; }
 .field { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.85rem; min-width: 0; } /* min-width: a long option in a select must not stretch the page */
 select { text-overflow: ellipsis; }
 .field label, .label { font-weight: 600; font-size: 0.9rem; }

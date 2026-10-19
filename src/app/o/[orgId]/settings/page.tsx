@@ -68,14 +68,14 @@ function GeneralSettings() {
 }
 
 // ---------------------------------------------------------------------------------------------
-interface SettingsView { settings: { channel: "in_app" | "email"; event: string; enabled: boolean; isDefault: boolean }[]; digest: "off" | "daily" | "weekly"; quietStart: string | null; quietEnd: string | null; autoEmail: boolean }
+interface SettingsView { settings: { channel: "in_app" | "email"; event: string; enabled: boolean; isDefault: boolean }[]; digest: "off" | "daily" | "weekly"; quietStart: string | null; quietEnd: string | null; autoEmail: boolean; emailSchedule: "instant" | "daily" }
 
 /** Administrators: the automatic-e-mail switch, and the button that sends the waiting e-mails. */
 function EmailSending({ onChanged }: { onChanged: () => void }) {
   const { orgId } = useOrg();
   const { t, err } = useI18n();
   const toast = useToast();
-  const org = useQuery<{ autoEmail: boolean }>(`org-settings:${orgId}`, () => api(`/api/orgs/${orgId}/settings`));
+  const org = useQuery<{ autoEmail: boolean; emailSchedule: "instant" | "daily" }>(`org-settings:${orgId}`, () => api(`/api/orgs/${orgId}/settings`));
   const w = useQuery<{ waiting: number }>(`ne:${orgId}`, () => api(`/api/orgs/${orgId}/notification-emails`), { refreshMs: 60_000 });
   const [busy, setBusy] = useState(false);
   // the switch answers at once; the chosen value is shown until a newer answer from the server has been read
@@ -85,6 +85,13 @@ function EmailSending({ onChanged }: { onChanged: () => void }) {
     setChosen({ value: on, shownWith: org.data });
     try { await api(`/api/orgs/${orgId}/settings`, { method: "PUT", body: { autoEmail: on } }); org.reload(); onChanged(); toast(t("ui.save")); }
     catch (e) { setChosen(undefined); toast(err(e), "error"); }
+  }
+  const [chosenWhen, setChosenWhen] = useState<{ value: "instant" | "daily"; shownWith: object }>();
+  async function setWhen(value: "instant" | "daily") {
+    if (!org.data) return;
+    setChosenWhen({ value, shownWith: org.data });
+    try { await api(`/api/orgs/${orgId}/settings`, { method: "PUT", body: { emailSchedule: value } }); org.reload(); onChanged(); toast(t("ui.save")); }
+    catch (e) { setChosenWhen(undefined); toast(err(e), "error"); }
   }
   async function send() {
     setBusy(true);
@@ -98,6 +105,7 @@ function EmailSending({ onChanged }: { onChanged: () => void }) {
   if (org.error) return <ErrorNote error={org.error} onRetry={org.reload} />;
   if (w.error) return <ErrorNote error={w.error} onRetry={w.reload} />;
   const auto = chosen && org.data === chosen.shownWith ? chosen.value : org.data!.autoEmail;
+  const when = chosenWhen && org.data === chosenWhen.shownWith ? chosenWhen.value : org.data!.emailSchedule;
   const waiting = w.data!.waiting;
   return (
     <section className="card stack" aria-labelledby="h-email-sending">
@@ -108,6 +116,17 @@ function EmailSending({ onChanged }: { onChanged: () => void }) {
         <span className="badge" data-state={auto ? "open" : "closed"}>{auto ? t("ui.auto_email_state_on") : t("ui.auto_email_state_off")}</span>
       </label>
       <p className="muted">{auto ? t("ui.auto_email_hint_on") : t("ui.auto_email_hint_off")}</p>
+      {auto && (
+        <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0 }}>
+          <legend><strong>{t("ui.email_when_label")}</strong></legend>
+          {(["instant", "daily"] as const).map((v) => (
+            <label key={v} className="row" style={{ gap: "0.5rem", alignItems: "flex-start", flexWrap: "nowrap" }}>
+              <input type="radio" name="email-when" value={v} checked={when === v} onChange={() => void setWhen(v)} />
+              <span><strong>{t(v === "instant" ? "ui.email_when_instant" : "ui.email_when_daily")}</strong><br /><span className="muted">{t(v === "instant" ? "ui.email_when_instant_hint" : "ui.email_when_daily_hint")}</span></span>
+            </label>
+          ))}
+        </fieldset>
+      )}
       {(!auto || waiting > 0) && (
         <div className="row">
           <span aria-live="polite">{t("ui.emails_waiting", { n: String(waiting) })}</span>
@@ -131,6 +150,7 @@ function NotificationSettings() {
     <div className="stack">
       {can.manageSettings && <EmailSending onChanged={q.reload} />}
       {!s.autoEmail && !can.manageSettings && <Notice>{t("ui.email_user_note_manual")}</Notice>}
+      {s.autoEmail && s.emailSchedule === "daily" && !can.manageSettings && <Notice>{t("ui.email_user_note_daily")}</Notice>}
       <TableWrap label={t("ui.notification_settings")}><table>
         <thead><tr><th>{t("ui.events")}</th><th>{t("ui.channel_in_app")}</th><th>{t("ui.channel_email")}</th></tr></thead>
         <tbody>

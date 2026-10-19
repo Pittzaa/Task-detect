@@ -1,14 +1,15 @@
 import { eq } from "drizzle-orm";
 import { auditLogs, organizations } from "@/db/schema";
+import { asEmailSchedule, type EmailSchedule } from "@/domain/email-schedule";
 import { notFound } from "@/lib/errors";
 import type { TenantSession } from "./tenant";
 
 /** Organization-wide switches. Only people who may manage settings see or change them. */
 export async function getOrgSettings(s: TenantSession) {
   s.require("org.manage_settings");
-  const [org] = await s.tx.select({ name: organizations.name, slug: organizations.slug, registrationOpen: organizations.registrationOpen, autoEmail: organizations.autoEmail }).from(organizations).where(eq(organizations.id, s.orgId));
+  const [org] = await s.tx.select({ name: organizations.name, slug: organizations.slug, registrationOpen: organizations.registrationOpen, autoEmail: organizations.autoEmail, emailSchedule: organizations.emailSchedule }).from(organizations).where(eq(organizations.id, s.orgId));
   if (!org) throw notFound();
-  return org;
+  return { ...org, emailSchedule: asEmailSchedule(org.emailSchedule) };
 }
 
 /**
@@ -33,5 +34,18 @@ export async function setAutoEmail(s: TenantSession, on: boolean) {
   const res = await s.tx.update(organizations).set({ autoEmail: on }).where(eq(organizations.id, s.orgId)).returning({ autoEmail: organizations.autoEmail });
   if (!res[0]) throw notFound();
   await s.tx.insert(auditLogs).values({ orgId: s.orgId, actorUserId: s.userId, action: on ? "org.auto_email_on" : "org.auto_email_off", targetType: "organization", targetId: s.orgId });
+  return res[0];
+}
+
+/**
+ * When automatic e-mail goes out: "instant" as soon as the background work runs (own server, or a plan that runs it every minute or faster), "daily" held for
+ * 23:00 Thai time (a once-a-day cron such as Vercel Hobby). It only matters while automatic e-mail is on; the administrator's button sends at once in either mode.
+ * E-mails already queued keep the time they were queued for.
+ */
+export async function setEmailSchedule(s: TenantSession, schedule: EmailSchedule) {
+  s.require("org.manage_settings");
+  const res = await s.tx.update(organizations).set({ emailSchedule: schedule }).where(eq(organizations.id, s.orgId)).returning({ emailSchedule: organizations.emailSchedule });
+  if (!res[0]) throw notFound();
+  await s.tx.insert(auditLogs).values({ orgId: s.orgId, actorUserId: s.userId, action: schedule === "daily" ? "org.email_schedule_daily" : "org.email_schedule_instant", targetType: "organization", targetId: s.orgId });
   return res[0];
 }

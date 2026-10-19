@@ -52,6 +52,8 @@ erDiagram
     timestamp_with_time_zone created_at
     timestamp_with_time_zone deleted_at
     boolean registration_open
+    boolean auto_email
+    text email_schedule
   }
   memberships {
     uuid id PK
@@ -406,6 +408,7 @@ erDiagram
     timestamp_with_time_zone read_at
     timestamp_with_time_zone emailed_at
     timestamp_with_time_zone digested_at
+    boolean email_wanted
   }
   notification_settings {
     uuid org_id PK
