@@ -260,10 +260,36 @@ tests/            unit · integration · e2e        docs/      เอกสา�
 
 ### บนมือถือ (กว้าง 390 px)
 
-<table>
-  <tr>
-    <td><img src="docs/screenshots/25-mobile-tasks.png" alt="รายการงานบนมือถือ" width="300"></td>
-    <td><img src="docs/screenshots/26-mobile-task-detail.png" alt="รายละเอียดงานบนมือถือ" width="300"></td>
-  </tr>
-</table>
+แคปจากหน้าต่างกว้าง 390 px (ขนาดมือถือ) ของแอปจริง หน้าไม่ล้นจอด้านข้างทุกหน้า รูปทั้งหมดใส่เป็นรูปธรรมดาทีละรูป (ไม่ใช้ตาราง HTML) เพื่อให้แสดงได้ทุกที่ที่อ่าน README
 
+**เข้าสู่ระบบ**
+
+![เข้าสู่ระบบบนมือถือ](docs/screenshots/27-mobile-login.png)
+
+**แดชบอร์ด**
+
+![แดชบอร์ดบนมือถือ](docs/screenshots/28-mobile-dashboard.png)
+
+**รายการงาน**
+
+![รายการงานบนมือถือ](docs/screenshots/25-mobile-tasks.png)
+
+**รายละเอียดงาน**
+
+![รายละเอียดงานบนมือถือ](docs/screenshots/26-mobile-task-detail.png)
+
+**โครงสร้างองค์กร** (ปุ่มลบเห็นเฉพาะผู้ดูแล)
+
+![โครงสร้างองค์กรบนมือถือ](docs/screenshots/29-mobile-structure.png)
+
+**ยืนยันการลบ** ต้องพิมพ์ชื่อให้ตรงก่อนปุ่มลบจะกดได้ (ในภาพพิมพ์ยังไม่ครบ ปุ่มจึงจาง)
+
+![ยืนยันการลบบนมือถือ](docs/screenshots/30-mobile-delete-confirm.png)
+
+**ตั้งค่า → ทั่วไป** สวิตช์เปิด/ปิดรับสมัครสมาชิก
+
+![ตั้งค่าทั่วไปบนมือถือ](docs/screenshots/31-mobile-settings-general.png)
+
+**สมาชิก**
+
+![สมาชิกบนมือถือ](docs/screenshots/32-mobile-members.png)
