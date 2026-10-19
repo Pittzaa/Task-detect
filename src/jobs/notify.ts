@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { can } from "@/authz/evaluate";
 import type { Tx } from "@/db/client";
-import { notificationSettings, notifications, projects, tasks, users } from "@/db/schema";
+import { notificationSettings, notifications, organizations, projects, tasks, users } from "@/db/schema";
 import { defaultEnabled, type Channel, type NotificationType } from "@/domain/notifications";
 import { DEFAULT_LOCALE, isLocale, t, type Locale } from "@/i18n";
 import { formatDate } from "@/domain/time";
@@ -61,13 +61,15 @@ export interface NewNotification {
   params?: Record<string, string>;
   dedupeKey: string;
   inApp?: boolean;
+  /** The recipient has e-mail switched on for this event (see notifications.email_wanted). */
+  emailWanted?: boolean;
 }
 
 /** Inserts a notification; returns its id, or null if an identical one (same dedupe key) already exists. */
 export async function insertNotification(tx: Tx, n: NewNotification): Promise<string | null> {
   const rows = await tx
     .insert(notifications)
-    .values({ orgId: n.orgId, userId: n.userId, type: n.type, taskId: n.taskId, actorId: n.actorId ?? null, params: n.params ?? {}, dedupeKey: n.dedupeKey, inApp: n.inApp ?? true })
+    .values({ orgId: n.orgId, userId: n.userId, type: n.type, taskId: n.taskId, actorId: n.actorId ?? null, params: n.params ?? {}, dedupeKey: n.dedupeKey, inApp: n.inApp ?? true, emailWanted: n.emailWanted ?? false })
     .onConflictDoNothing({ target: [notifications.userId, notifications.dedupeKey] })
     .returning({ id: notifications.id });
   return rows[0]?.id ?? null;
@@ -139,14 +141,22 @@ export async function renderNotification(tx: Tx, orgId: string, n: RenderInput, 
 const statusLabel = (l: Locale, v?: string) => (v ? t(l, `status.${v}` as never) : "");
 const priorityLabel = (l: Locale, v?: string) => (v ? t(l, `priority.${v}` as never) : "");
 
+/** Whether the organization has switched on automatic e-mail (Settings -> Notifications). Read where the work starts, once per event or scan. */
+export async function orgAutoEmail(tx: Tx, orgId: string): Promise<boolean> {
+  const [o] = await tx.select({ auto: organizations.autoEmail }).from(organizations).where(eq(organizations.id, orgId));
+  return o?.auto === true;
+}
+
 /**
- * Creates notifications for `userIds` about `task` and queues the email deliveries.
+ * Creates notifications for `userIds` about `task`. With `autoEmail` (see orgAutoEmail) it also queues the email deliveries; without it the
+ * e-mail is only recorded as wanted (`emailWanted`) and waits until an administrator sends the waiting e-mails
+ * (src/data/notification-emails.ts). Notifications inside the app are created either way.
  * Only people who can read the task right now are notified; in-app/email switches are honoured per user.
  * Idempotent: the same `key` for the same recipient never produces a second notification.
  */
 export async function deliverToUsers(
   tx: Tx,
-  o: { orgId: string; task: TaskRow; type: NotificationType; userIds: string[]; actorId?: string | null; params?: Record<string, string>; key: string; now: Date },
+  o: { orgId: string; task: TaskRow; type: NotificationType; userIds: string[]; actorId?: string | null; params?: Record<string, string>; key: string; now: Date; autoEmail: boolean },
 ): Promise<number> {
   if (o.task.deletedAt) return 0;
   const candidates = [...new Set(o.userIds)].filter((u) => u !== o.actorId);
@@ -156,10 +166,10 @@ export async function deliverToUsers(
   let created = 0;
   for (const userId of readers) {
     if (!inApp.has(userId) && !email.has(userId)) continue;
-    const id = await insertNotification(tx, { orgId: o.orgId, userId, type: o.type, taskId: o.task.id, actorId: o.actorId ?? null, params: o.params, dedupeKey: o.key, inApp: inApp.has(userId) });
+    const id = await insertNotification(tx, { orgId: o.orgId, userId, type: o.type, taskId: o.task.id, actorId: o.actorId ?? null, params: o.params, dedupeKey: o.key, inApp: inApp.has(userId), emailWanted: email.has(userId) });
     if (!id) continue;
     created++;
-    if (email.has(userId)) await enqueue(tx, { kind: "notification.email", orgId: o.orgId, payload: { notificationId: id }, dedupeKey: `email:${id}`, maxAttempts: 8, runAt: o.now });
+    if (email.has(userId) && o.autoEmail) await enqueue(tx, { kind: "notification.email", orgId: o.orgId, payload: { notificationId: id }, dedupeKey: `email:${id}`, maxAttempts: 8, runAt: o.now });
   }
   return created;
 }

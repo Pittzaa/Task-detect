@@ -13,7 +13,7 @@ import type { JobHandler } from "../worker";
  * emailed individually is left out.
  */
 export const digestRun: JobHandler = async (ctx) => {
-  const orgs = await withWorker(ctx.db, (tx) => tx.select({ id: organizations.id }).from(organizations).where(isNull(organizations.deletedAt)));
+  const orgs = await withWorker(ctx.db, (tx) => tx.select({ id: organizations.id }).from(organizations).where(and(isNull(organizations.deletedAt), eq(organizations.autoEmail, true))));
   for (const org of orgs) {
     const prefs = await withWorkerOrg(ctx.db, org.id, (tx) => tx.select().from(notificationPrefs).where(and(eq(notificationPrefs.orgId, org.id), ne(notificationPrefs.digest, "off"))));
     for (const pref of prefs) {

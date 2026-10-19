@@ -68,10 +68,58 @@ function GeneralSettings() {
 }
 
 // ---------------------------------------------------------------------------------------------
-interface SettingsView { settings: { channel: "in_app" | "email"; event: string; enabled: boolean; isDefault: boolean }[]; digest: "off" | "daily" | "weekly"; quietStart: string | null; quietEnd: string | null }
+interface SettingsView { settings: { channel: "in_app" | "email"; event: string; enabled: boolean; isDefault: boolean }[]; digest: "off" | "daily" | "weekly"; quietStart: string | null; quietEnd: string | null; autoEmail: boolean }
+
+/** Administrators: the automatic-e-mail switch, and the button that sends the waiting e-mails. */
+function EmailSending({ onChanged }: { onChanged: () => void }) {
+  const { orgId } = useOrg();
+  const { t, err } = useI18n();
+  const toast = useToast();
+  const org = useQuery<{ autoEmail: boolean }>(`org-settings:${orgId}`, () => api(`/api/orgs/${orgId}/settings`));
+  const w = useQuery<{ waiting: number }>(`ne:${orgId}`, () => api(`/api/orgs/${orgId}/notification-emails`), { refreshMs: 60_000 });
+  const [busy, setBusy] = useState(false);
+  // the switch answers at once; the chosen value is shown until a newer answer from the server has been read
+  const [chosen, setChosen] = useState<{ value: boolean; shownWith: object }>();
+  async function setAuto(on: boolean) {
+    if (!org.data) return;
+    setChosen({ value: on, shownWith: org.data });
+    try { await api(`/api/orgs/${orgId}/settings`, { method: "PUT", body: { autoEmail: on } }); org.reload(); onChanged(); toast(t("ui.save")); }
+    catch (e) { setChosen(undefined); toast(err(e), "error"); }
+  }
+  async function send() {
+    setBusy(true);
+    try {
+      const r = await api<{ queued: number; more: boolean }>(`/api/orgs/${orgId}/notification-emails`, { method: "POST" });
+      toast(`${t("ui.emails_queued", { n: String(r.queued) })}${r.more ? ` ${t("ui.emails_more")}` : ""}`);
+      w.reload();
+    } catch (e) { toast(err(e), "error"); } finally { setBusy(false); }
+  }
+  if ((org.loading && !org.data) || (w.loading && !w.data)) return <Loading />;
+  if (org.error) return <ErrorNote error={org.error} onRetry={org.reload} />;
+  if (w.error) return <ErrorNote error={w.error} onRetry={w.reload} />;
+  const auto = chosen && org.data === chosen.shownWith ? chosen.value : org.data!.autoEmail;
+  const waiting = w.data!.waiting;
+  return (
+    <section className="card stack" aria-labelledby="h-email-sending">
+      <h2 id="h-email-sending">{t("ui.email_sending")}</h2>
+      <label className="row" style={{ gap: "0.5rem" }}>
+        <input type="checkbox" role="switch" checked={auto} onChange={(e) => void setAuto(e.target.checked)} />
+        <span>{t("ui.auto_email_label")}</span>
+        <span className="badge" data-state={auto ? "open" : "closed"}>{auto ? t("ui.auto_email_state_on") : t("ui.auto_email_state_off")}</span>
+      </label>
+      <p className="muted">{auto ? t("ui.auto_email_hint_on") : t("ui.auto_email_hint_off")}</p>
+      {(!auto || waiting > 0) && (
+        <div className="row">
+          <span aria-live="polite">{t("ui.emails_waiting", { n: String(waiting) })}</span>
+          <Btn kind="primary" onClick={() => void send()} disabled={busy || waiting === 0}>{t("ui.send_waiting_emails")}</Btn>
+        </div>
+      )}
+    </section>
+  );
+}
 
 function NotificationSettings() {
-  const { orgId } = useOrg();
+  const { orgId, can } = useOrg();
   const { t, err } = useI18n();
   const toast = useToast();
   const q = useQuery<SettingsView>(`ns:${orgId}`, () => api(`/api/orgs/${orgId}/notification-settings`));
@@ -81,6 +129,8 @@ function NotificationSettings() {
   const s = q.data!;
   return (
     <div className="stack">
+      {can.manageSettings && <EmailSending onChanged={q.reload} />}
+      {!s.autoEmail && !can.manageSettings && <Notice>{t("ui.email_user_note_manual")}</Notice>}
       <TableWrap label={t("ui.notification_settings")}><table>
         <thead><tr><th>{t("ui.events")}</th><th>{t("ui.channel_in_app")}</th><th>{t("ui.channel_email")}</th></tr></thead>
         <tbody>
@@ -97,7 +147,7 @@ function NotificationSettings() {
       </table></TableWrap>
       <div className="card grid cols-3">
         <Field label={t("ui.digest")}>{(id) => (
-          <select id={id} value={s.digest} onChange={(e) => void put({ digest: e.target.value })}><option value="off">{t("ui.digest_off")}</option><option value="daily">{t("ui.digest_daily")}</option><option value="weekly">{t("ui.digest_weekly")}</option></select>
+          <select id={id} value={s.digest} disabled={!s.autoEmail} onChange={(e) => void put({ digest: e.target.value })}><option value="off">{t("ui.digest_off")}</option><option value="daily">{t("ui.digest_daily")}</option><option value="weekly">{t("ui.digest_weekly")}</option></select>
         )}</Field>
         <Field label={`${t("ui.quiet_hours")}: ${t("ui.quiet_start")}`}>{(id) => <input id={id} type="time" value={s.quietStart ?? ""} onChange={(e) => void put(e.target.value ? { quietStart: e.target.value, quietEnd: s.quietEnd ?? "07:00" } : { quietStart: null, quietEnd: null })} />}</Field>
         <Field label={t("ui.quiet_end")}>{(id) => <input id={id} type="time" value={s.quietEnd ?? ""} disabled={!s.quietStart} onChange={(e) => void put({ quietEnd: e.target.value })} />}</Field>

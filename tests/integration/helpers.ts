@@ -22,8 +22,9 @@ export function connect() {
   return { admin: admin.db, app: app.db, close: async () => { await admin.close(); await app.close(); } };
 }
 
-export async function makeOrg(admin: Db, name = "Org") {
-  const [org] = await admin.insert(organizations).values({ name, slug: `${name.toLowerCase()}-${randomUUID()}` }).returning();
+/** `autoEmail` defaults to ON here: most notification tests exercise automatic sending. Production organizations start with it off; email-mode.test.ts says so. */
+export async function makeOrg(admin: Db, name = "Org", o: { autoEmail?: boolean } = {}) {
+  const [org] = await admin.insert(organizations).values({ name, slug: `${name.toLowerCase()}-${randomUUID()}`, autoEmail: o.autoEmail ?? true }).returning();
   const [dept] = await admin.insert(departments).values({ orgId: org!.id, name: `${name} Dept` }).returning();
   const [team] = await admin.insert(teams).values({ orgId: org!.id, departmentId: dept!.id, name: `${name} Team` }).returning();
   const [project] = await admin.insert(projects).values({ orgId: org!.id, name: `${name} Project` }).returning();

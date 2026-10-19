@@ -3,6 +3,7 @@ import { getSettings, updateSettings } from "@/data/notifications";
 import { handle, readJson } from "@/server/api";
 
 type P = { params: Promise<{ orgId: string }> };
+/** The caller's own switches, plus whether e-mail is sent automatically in this organization (the page explains manual sending and disables the digests). */
 export const GET = (req: Request, { params }: P) => handle(req, async (c) => c.tenant((await params).orgId, (s) => getSettings(s)));
 export const PUT = (req: Request, { params }: P) =>
   handle(req, async (c) => {

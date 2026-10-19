@@ -6,7 +6,7 @@ import {
 import type { NotificationType } from "@/domain/notifications";
 import { logger } from "@/lib/logger";
 import { withWorker, switchOrg } from "../context";
-import { deliverToUsers } from "../notify";
+import { deliverToUsers, orgAutoEmail } from "../notify";
 import { enqueue } from "../queue";
 import type { JobHandler } from "../worker";
 
@@ -58,6 +58,7 @@ async function participantsOf(tx: Tx, orgId: string, task: TaskRow): Promise<str
 
 async function processEvent(tx: Tx, ev: EventRow, now: Date) {
   await switchOrg(tx, ev.orgId);
+  const autoEmail = await orgAutoEmail(tx, ev.orgId);
   const p = ev.payload as Record<string, unknown>;
   const taskId = typeof p.taskId === "string" ? p.taskId : null;
   if (!taskId) return;
@@ -66,7 +67,7 @@ async function processEvent(tx: Tx, ev: EventRow, now: Date) {
   const actorId = typeof p.actorId === "string" ? p.actorId : null;
 
   const notify = (target: TaskRow, type: NotificationType, userIds: string[], params: Record<string, string>, key: string) =>
-    deliverToUsers(tx, { orgId: ev.orgId, task: target, type, userIds, actorId, params, key, now });
+    deliverToUsers(tx, { orgId: ev.orgId, task: target, type, userIds, actorId, params, key, now, autoEmail });
 
   const added = Array.isArray(p.added) ? (p.added as string[]) : [];
   const removed = Array.isArray(p.removed) ? (p.removed as string[]) : [];

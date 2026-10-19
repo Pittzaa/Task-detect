@@ -184,7 +184,7 @@ test("a change made by someone else appears without reloading, and idle pages po
   await watcher.ctx.close(); await author.ctx.close();
 });
 
-test("the cron endpoint refuses callers without the secret, then delivers the mention to the viewer", async ({ page, request }) => {
+test("the cron endpoint refuses callers without the secret; the viewer's bell shows the mention and, in the default manual mode, no e-mail is sent by itself", async ({ page, request }) => {
   const denied = await request.get("/api/cron/tick");
   expect(denied.status()).toBe(401);
   const wrong = await request.get("/api/cron/tick", { headers: { authorization: "Bearer not-the-secret-not-the-secret" } });
@@ -200,8 +200,8 @@ test("the cron endpoint refuses callers without the secret, then delivers the me
   await page.getByRole("button", { name: /^Notifications/ }).click();
   const bell = page.getByRole("region", { name: "Notifications" });
   await expect(bell.getByRole("link", { name: /Ada Admin mentioned you on "Design the homepage"/ })).toBeVisible();
-  // an email was queued and delivered through the sink for the same event
-  expect(mails().slice(before).some((m) => m.to === "sam@e2e.test")).toBe(true);
+  // automatic e-mail is off (how an organization starts): the e-mail for this event waits for an administrator (10-manual-email.spec.ts sends it)
+  expect(mails().slice(before).some((m) => m.to === "sam@e2e.test")).toBe(false);
   await bell.getByRole("link", { name: /mentioned you/ }).click();
   await expect(page.getByRole("dialog").getByRole("heading", { name: "Design the homepage", level: 2 })).toBeVisible();
 });

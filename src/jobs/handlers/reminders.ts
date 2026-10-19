@@ -2,7 +2,7 @@ import { and, eq, gte, isNotNull, isNull, lte, notInArray, sql } from "drizzle-o
 import { integrationDestinations, organizations, projectTeams, taskAssignees, tasks } from "@/db/schema";
 import { addDays, reminderInstant, todayIn } from "@/domain/time";
 import { withWorker, withWorkerOrg } from "../context";
-import { deliverToUsers, loadProfiles } from "../notify";
+import { deliverToUsers, loadProfiles, orgAutoEmail } from "../notify";
 import { enqueue } from "../queue";
 import type { JobHandler } from "../worker";
 import { logger } from "@/lib/logger";
@@ -32,6 +32,7 @@ async function scanOrg(ctx: Parameters<JobHandler>[0], orgId: string) {
   const now = ctx.now();
   const utcToday = now.toISOString().slice(0, 10);
   await withWorkerOrg(ctx.db, orgId, async (tx) => {
+    const autoEmail = await orgAutoEmail(tx, orgId);
     const rows = await tx
       .select()
       .from(tasks)
@@ -49,10 +50,10 @@ async function scanOrg(ctx: Parameters<JobHandler>[0], orgId: string) {
         const today = todayIn(tz, now);
         const due = task.dueDate!;
         if (due < today) {
-          const n = await deliverToUsers(tx, { orgId, task, type: "task.overdue", userIds: [userId], params: { dueDate: due }, key: `overdue:${task.id}:${due}`, now });
+          const n = await deliverToUsers(tx, { orgId, task, type: "task.overdue", userIds: [userId], params: { dueDate: due }, key: `overdue:${task.id}:${due}`, now, autoEmail });
           overdueFired ||= n > 0;
         } else if (task.reminderDaysBefore != null && now >= reminderInstant(due, task.reminderDaysBefore, tz)) {
-          const n = await deliverToUsers(tx, { orgId, task, type: "task.due_soon", userIds: [userId], params: { dueDate: due }, key: `due:${task.id}:${due}:${task.reminderDaysBefore}`, now });
+          const n = await deliverToUsers(tx, { orgId, task, type: "task.due_soon", userIds: [userId], params: { dueDate: due }, key: `due:${task.id}:${due}:${task.reminderDaysBefore}`, now, autoEmail });
           dueSoonFired ||= n > 0;
         }
       }

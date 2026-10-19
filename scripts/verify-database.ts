@@ -61,10 +61,10 @@ async function main() {
     const exec = (await c.query(`select has_function_privilege(current_user, 'purge_audit_logs(integer)', 'execute') as ok`)).rows[0];
     record("runtime role may execute purge_audit_logs()", exec.ok === true);
 
-    // Organizations are created by the operator only; the one thing the runtime role may change is the registration switch.
-    const orgPriv = (await c.query(`select has_table_privilege(current_user, 'organizations', 'insert') as ins, has_table_privilege(current_user, 'organizations', 'update') as upd, has_table_privilege(current_user, 'organizations', 'delete') as del, has_column_privilege(current_user, 'organizations', 'registration_open', 'update') as sw, has_column_privilege(current_user, 'organizations', 'name', 'update') as name`)).rows[0];
+    // Organizations are created by the operator only; the only things the runtime role may change are the registration and automatic-e-mail switches.
+    const orgPriv = (await c.query(`select has_table_privilege(current_user, 'organizations', 'insert') as ins, has_table_privilege(current_user, 'organizations', 'update') as upd, has_table_privilege(current_user, 'organizations', 'delete') as del, has_column_privilege(current_user, 'organizations', 'registration_open', 'update') as sw, has_column_privilege(current_user, 'organizations', 'auto_email', 'update') as ae, has_column_privilege(current_user, 'organizations', 'name', 'update') as name`)).rows[0];
     record("runtime role cannot create, rename or delete organizations", !orgPriv.ins && !orgPriv.upd && !orgPriv.del && !orgPriv.name);
-    record("runtime role may change the registration switch (re-run scripts/grants.sql if this fails)", orgPriv.sw === true);
+    record("runtime role may change the registration and automatic-e-mail switches (re-run scripts/grants.sql if this fails)", orgPriv.sw === true && orgPriv.ae === true);
 
     const applied = (await c.query(`select count(*)::int as n from drizzle.__drizzle_migrations`).catch(() => ({ rows: [{ n: -1 }] }))).rows[0].n as number;
     record("migrations table is readable (re-run scripts/grants.sql if this fails)", applied > 0, `${applied} applied`);

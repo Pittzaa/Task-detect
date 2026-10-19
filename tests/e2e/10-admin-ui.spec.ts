@@ -135,10 +135,8 @@ test("notification preferences persist across reloads", async ({ page }) => {
   await expect.poll(async () => ((await (await page.request.get(`/api/orgs/${acme()}/notification-settings`)).json()) as { settings: { event: string; channel: string; enabled: boolean }[] }).settings.find((s) => s.event === "task.commented" && s.channel === "email")!.enabled).toBe(!was);
   await page.reload();
   await expect(page.getByRole("checkbox", { name: "task.commented email" })).toBeChecked({ checked: !was });
-  await page.getByLabel("Email digest").selectOption("weekly");
-  await page.reload();
-  await expect(page.getByLabel("Email digest")).toHaveValue("weekly");
-  await page.getByLabel("Email digest").selectOption("off");
+  // digests only run with automatic e-mail; in the default manual mode the choice is shown but cannot be changed (10-manual-email.spec.ts)
+  await expect(page.getByLabel("Email digest")).toBeDisabled();
   await expect(page.getByRole("checkbox", { name: "task.commented email" })).toBeChecked({ checked: !was });
   await page.getByRole("checkbox", { name: "task.commented email" }).click(); // restore the shared account's setting
   await expect(page.getByRole("checkbox", { name: "task.commented email" })).toBeChecked({ checked: was });

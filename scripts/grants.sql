@@ -7,8 +7,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {{APP_ROL
 REVOKE UPDATE, DELETE, TRUNCATE ON audit_logs FROM {{APP_ROLE}};
 -- System roles/organizations are managed by the admin path, not by tenant sessions.
 REVOKE INSERT, UPDATE, DELETE ON organizations FROM {{APP_ROLE}};
--- ...except the one setting organization administrators may change themselves (the RLS policy org_update limits it to their own organization).
-GRANT UPDATE (registration_open) ON organizations TO {{APP_ROLE}};
+-- ...except the two settings organization administrators may change themselves (the RLS policy org_update limits it to their own organization):
+-- who may register, and whether notification e-mails are sent automatically.
+GRANT UPDATE (registration_open, auto_email) ON organizations TO {{APP_ROLE}};
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO {{APP_ROLE}};
 -- Read-only view of the applied-migrations list, so /api/health/ready can detect a deployment that is ahead of its database.
 GRANT USAGE ON SCHEMA drizzle TO {{APP_ROLE}};

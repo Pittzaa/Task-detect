@@ -35,6 +35,9 @@ export const organizations = pgTable("organizations", {
   slug: text("slug").notNull().unique(),
   // false: nobody new can sign up or ask to join (people with a pending invitation still can). Changed by organization administrators.
   registrationOpen: boolean("registration_open").notNull().default(true),
+  // Notification e-mails and digests are sent by themselves. Off (the default): e-mails wait until an administrator presses "send". Turn it
+  // on where something runs the background work regularly (a cron every minute on your own server, a paid Vercel plan).
+  autoEmail: boolean("auto_email").notNull().default(false),
   createdAt: createdAt(),
   deletedAt: deletedAt(),
 });
@@ -734,6 +737,9 @@ export const notifications = pgTable(
     createdAt: createdAt(),
     readAt: timestamp("read_at", { withTimezone: true }),
     emailedAt: timestamp("emailed_at", { withTimezone: true }),
+    // The recipient had e-mail switched on for this event when it was created. Whether it is queued at once (organizations.auto_email)
+    // or when an administrator presses "send waiting e-mails" (the default) is decided elsewhere; this only records who wants one.
+    emailWanted: boolean("email_wanted").notNull().default(false),
     digestedAt: timestamp("digested_at", { withTimezone: true }),
   },
   (t) => [
@@ -742,6 +748,7 @@ export const notifications = pgTable(
     uniqueIndex("notifications_dedupe_uq").on(t.userId, t.dedupeKey),
     index("notifications_user_idx").on(t.orgId, t.userId, t.createdAt),
     index("notifications_org_created_idx").on(t.orgId, t.createdAt),
+    index("notifications_email_waiting_idx").on(t.orgId, t.createdAt).where(sql`${t.emailWanted} and ${t.emailedAt} is null`),
   ],
 );
 

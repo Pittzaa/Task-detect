@@ -40,6 +40,7 @@ Use `pnpm verify:database`, `pnpm smoke`, `pnpm verify:attachments` and the manu
 * **Calendar sync** is one-way and per user; shared/team calendars, attendee invitations and time-of-day events are not supported (all-day events from dates).
 * **Time zones:** a user’s zone is set from the browser at registration; there is no automatic travel detection.
 * `GET /api/cron/tick` runs the worker inside one function invocation (≤ 45 s). Very large backlogs drain over several ticks.
+* **The default (automatic e-mail switched off) trades timeliness for running on a once-a-day cron.** Notifications in the app are produced when someone uses the app (up to 8 s of background work after a signed-in request, at most one run per instance per 5 s) and by the daily cron; with nobody using the app they wait until someone does. The same applies to Discord messages and calendar sync. Notification e-mails are sent only when an administrator presses the button (recent ones only: 7 days, 500 per press); there are no digests. An administrator may switch automatic e-mail on at any time, but on Hobby the e-mails then still wait for a visit or the daily cron; only a per-minute scheduler makes them prompt. This request-driven path has been tested against the local database only, never on Vercel: whether work started after a response (`after()`) is allowed to finish within the plan's function time limit is **unverified**.
 
 ## One organization, the first administrator and deleting structure
 
@@ -62,7 +63,7 @@ Use `pnpm verify:database`, `pnpm smoke`, `pnpm verify:attachments` and the manu
 
 ## Decisions left to the owner
 
-1. Vercel plan: per-minute cron (Pro) vs. an external scheduler ([DEPLOYMENT.md](DEPLOYMENT.md) §0).
+1. Vercel plan: the default (daily cron, manual e-mail sending) fits Hobby; automatic e-mails need a per-minute cron (a paid plan, or an external scheduler) ([DEPLOYMENT.md](DEPLOYMENT.md) §0).
 2. How and where to run the daily backup and the monthly restore drill, and whether to back up Blob.
 3. Whether to keep direct-to-Blob uploads switched on after you have tried them on the real store (`DIRECT_UPLOADS=off` turns them off without a redeploy of code).
 4. A security contact address and an incident owner.

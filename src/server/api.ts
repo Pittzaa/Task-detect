@@ -4,6 +4,7 @@ import { after } from "next/server";
 import { reportError } from "@/lib/error-report";
 import { withTenant, type TenantSession } from "@/data/tenant";
 import type { Db } from "@/db/client";
+import { kick } from "@/jobs/kick";
 import { consumeRateLimit } from "./rate-limit";
 import { getRuntime, type Runtime } from "./runtime";
 
@@ -99,6 +100,15 @@ function errorResponse(e: unknown, req: Request, requestId?: string): Response {
 }
 
 /**
+ * Without a per-minute scheduler (Vercel Hobby) the background work also runs when the app is used: once the response has gone out, a
+ * signed-in request lets the worker handle what is due (src/jobs/kick.ts). With a scheduler it finds little to do. Outside a request
+ * (unit tests) there is nothing to hook into.
+ */
+function kickAfterResponse(rt: Runtime) {
+  try { after(() => kick(rt.jobContext())); } catch { /* not inside a request */ }
+}
+
+/**
  * Wraps a route handler: same-origin check, authentication, uniform error mapping.
  * `auth: false` is for the few public endpoints and must be a deliberate choice.
  */
@@ -131,6 +141,7 @@ async function handleInner(req: Request, fn: (c: ApiContext) => Promise<unknown>
       },
     };
     const result = await fn(ctx);
+    kickAfterResponse(rt);
     if (result instanceof Response) return result;
     return json(result ?? { ok: true }, opts.status ?? 200);
   } catch (e) {

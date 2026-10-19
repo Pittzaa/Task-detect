@@ -17,7 +17,7 @@ Services        src/data/**           one transaction per request; s.require(per
 PostgreSQL      row-level security (FORCE) + composite FKs + CHECKs        ◄── second, independent layer
    ▲
    │  withWorker / withWorkerOrg
-Jobs            src/jobs/**           claimed with FOR UPDATE SKIP LOCKED + lease; woken by Vercel Cron → /api/cron/tick
+Jobs            src/jobs/**           claimed with FOR UPDATE SKIP LOCKED + lease; woken by Vercel Cron / a server cron → /api/cron/tick, and by signed-in requests → src/jobs/kick.ts
    ├─ outbox.process → notifications → notification.email (Resend) · discord.send (Discord webhook)
    ├─ reminders.scan · digest.run · series.generate
    ├─ calendar.sync_task / resync / reconcile / cleanup (Google Calendar, one-way)
@@ -73,11 +73,15 @@ See [ERD.md](ERD.md) (generated from the migrated database): 42 tables, 74 forei
 |---|---|---|
 | `outbox.process` | 60 s | Turn committed domain events into notifications and downstream jobs. |
 | `reminders.scan` | 5 min | Due-soon and overdue reminders at 09:00 in the assignee’s own zone. |
-| `digest.run` | 1 h | Daily/weekly digests respecting each user’s zone and quiet hours. |
+| `digest.run` | 1 h | Daily/weekly digests respecting each user’s zone and quiet hours. Only for organizations with automatic e-mail switched on. |
 | `series.generate` | 1 h | Top up recurring-task occurrences (30-day horizon, never backfilling the past). |
 | `calendar.reconcile` | 24 h | Detect drift between tasks and calendar links. |
 | `retention.purge` | 24 h | See [RETENTION.md](RETENTION.md). |
 | `storage.orphans` | 7 d | Remove unreferenced files. |
+
+**Two ways the same jobs get run.** A scheduler (a server cron, Vercel Pro cron, an external caller) hits `/api/cron/tick` about every minute. Where there is none (Vercel Hobby allows one run a day), after a signed-in request has been answered `src/jobs/kick.ts` also runs the light, user-facing kinds (outbox, reminders, recurring series, Discord, calendar sync, e-mail jobs) for up to 8 s, at most once per instance per 5 s; digests and the heavy sweeps are left to the cron. Both go through the same job table, so they cannot double-send.
+
+**Automatic e-mail is a per-organization switch** (`organizations.auto_email`, Settings → Notifications, default off). Notifications in the app are created the same way either way. With the switch on, `deliverToUsers` queues the `notification.email` job as soon as the notification exists, and `digest.run` serves the organization. With it off, the e-mail is only recorded (`notifications.email_wanted`) until an administrator presses "send waiting e-mails" (`src/data/notification-emails.ts`, `POST /api/orgs/:id/notification-emails`), which queues the same jobs under the same dedupe keys, so nothing is ever sent twice, whichever way it was queued.
 
 A job’s dedupe key includes its time bucket, so overlapping ticks enqueue it once. Handlers are idempotent and re-check permissions before touching protected content.
 Back-off: 30 s doubling to 1 h with jitter; `maxAttempts` then *dead*; a handler may `Deferred` (no attempt consumed) or `PermanentFailure`.

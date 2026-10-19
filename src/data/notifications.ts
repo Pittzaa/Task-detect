@@ -1,5 +1,5 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
-import { notificationPrefs, notificationSettings, notifications, users } from "@/db/schema";
+import { notificationPrefs, notificationSettings, notifications, organizations, users } from "@/db/schema";
 import { CHANNELS, NOTIFICATION_TYPES, defaultEnabled, isHHMM, isNotificationType, type Channel } from "@/domain/notifications";
 import { DEFAULT_LOCALE, isLocale } from "@/i18n";
 import { renderNotifications } from "@/jobs/notify";
@@ -49,6 +49,8 @@ export interface SettingsView {
   digest: "off" | "daily" | "weekly";
   quietStart: string | null;
   quietEnd: string | null;
+  /** The organization sends notification e-mails by itself (otherwise an administrator sends them). */
+  autoEmail: boolean;
 }
 
 export async function getSettings(s: TenantSession): Promise<SettingsView> {
@@ -59,7 +61,8 @@ export async function getSettings(s: TenantSession): Promise<SettingsView> {
     const row = rows.find((r) => r.channel === channel && r.event === event);
     settings.push({ channel, event, enabled: row ? row.enabled : defaultEnabled(channel, event), isDefault: !row });
   }
-  return { settings, digest: prefs?.digest ?? "off", quietStart: prefs?.quietStart ?? null, quietEnd: prefs?.quietEnd ?? null };
+  const [org] = await s.tx.select({ auto: organizations.autoEmail }).from(organizations).where(eq(organizations.id, s.orgId));
+  return { settings, digest: prefs?.digest ?? "off", quietStart: prefs?.quietStart ?? null, quietEnd: prefs?.quietEnd ?? null, autoEmail: org?.auto === true };
 }
 
 export async function updateSettings(

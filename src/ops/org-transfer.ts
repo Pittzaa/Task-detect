@@ -272,9 +272,9 @@ export async function importOrganization(q: Q, bundle: OrgBundle, o: { replace?:
     };
     if (!o.apply) { await q.query("rollback"); return result; }
 
-    // Whether people may register is a decision about NOW, not part of the data being put back: an older bundle must not quietly
-    // re-open registration that an administrator has closed since.
-    const keepRegistration = exists ? (await q.query<{ open: boolean }>("select registration_open as open from organizations where id = $1", [b.org.id])).rows[0]?.open : undefined;
+    // Whether people may register, and whether e-mails go out by themselves, are decisions about NOW, not part of the data being put back:
+    // an older bundle must not quietly re-open registration that an administrator has closed since, or switch e-mail sending back.
+    const keep = exists ? (await q.query<{ open: boolean; auto: boolean }>("select registration_open as open, auto_email as auto from organizations where id = $1", [b.org.id])).rows[0] : undefined;
     if (exists) {
       for (const t of TRANSIENT_TABLES) await q.query(`delete from ${ident(t)} where org_id = $1`, [b.org.id]);
       for (const t of [...plan.order].reverse()) await q.query(`delete from ${ident(t)} where ${plan.predicate[t]}`, [b.org.id]);
@@ -298,7 +298,7 @@ export async function importOrganization(q: Q, bundle: OrgBundle, o: { replace?:
         await q.query(`insert into ${ident(t)} (${cols}) select ${cols} from json_populate_recordset(null::${ident(t)}, $1::json)`, [JSON.stringify(rows.slice(i, i + CHUNK))]);
       }
     }
-    if (keepRegistration !== undefined) await q.query("update organizations set registration_open = $1 where id = $2", [keepRegistration, b.org.id]);
+    if (keep) await q.query("update organizations set registration_open = $1, auto_email = $2 where id = $3", [keep.open, keep.auto, b.org.id]);
     for (const t of plan.order) {
       const n = Number((await q.query<{ n: string }>(`select count(*) as n from ${ident(t)} where ${plan.predicate[t]}`, [b.org.id])).rows[0]!.n);
       if (n !== (b.tables[t]?.length ?? 0)) throw new Error(`verification failed for ${t}: expected ${b.tables[t]?.length ?? 0} rows, found ${n}; rolled back`);

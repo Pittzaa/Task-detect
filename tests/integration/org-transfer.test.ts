@@ -330,6 +330,20 @@ describe("replace (partial restore in the same database)", () => {
     expect((await src.query("select registration_open as open from organizations where id = $1", [O.org.id])).rows[0].open).toBe(true);
   });
 
+  it("keeps the automatic-e-mail switch as it is now, in both directions, without touching the registration switch", async () => {
+    const sw = async () => (await src.query("select auto_email as auto, registration_open as open from organizations where id = $1", [O.org.id])).rows[0] as { auto: boolean; open: boolean };
+    await src.query("update organizations set auto_email = true, registration_open = true where id = $1", [O.org.id]);
+    const withAuto = await exportOrganization(src, O.org.slug); // taken while e-mail was automatic
+    await src.query("update organizations set auto_email = false, registration_open = false where id = $1", [O.org.id]);
+    await importOrganization(src, withAuto, { replace: true, apply: true });
+    expect(await sw()).toEqual({ auto: false, open: false });
+    const withoutAuto = await exportOrganization(src, O.org.slug);
+    await src.query("update organizations set auto_email = true, registration_open = true where id = $1", [O.org.id]);
+    await importOrganization(src, withoutAuto, { replace: true, apply: true });
+    expect(await sw()).toEqual({ auto: true, open: true });
+    await src.query("update organizations set auto_email = false where id = $1", [O.org.id]);
+  });
+
   it("is all-or-nothing: a bundle that fails half way leaves the organization exactly as it was", async () => {
     const good = await exportOrganization(src, O.org.slug);
     const snapshot = normalize(good);
