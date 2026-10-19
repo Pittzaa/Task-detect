@@ -11,6 +11,9 @@ import type { JobRow } from "@/jobs/queue";
 import { registry } from "@/jobs/registry";
 import { setAutoEmail } from "@/data/org-settings";
 import { runWorker } from "@/jobs/worker";
+import { enqueue } from "@/jobs/queue";
+import { tick } from "@/jobs/tick";
+import { withWorker } from "@/jobs/context";
 import { AppError } from "@/lib/errors";
 import { RETENTION } from "@/domain/retention";
 import { addMember, connect, makeOrg, makeUser } from "./helpers";
@@ -219,6 +222,22 @@ describe("digests follow the switch", () => {
   });
 });
 
+describe("the once-a-day cron run", () => {
+  it("delivers first and tidies up after: a user-facing job runs before housekeeping that was due even earlier", async () => {
+    const { ctx } = makeJobCtx(c.app);
+    const when = new Date(Date.now() + 1100 * 86_400_000); // buckets nobody has used
+    ctx.now = () => when;
+    // housekeeping due an hour before the run, so plain run-at order would take it first
+    await withWorker(c.app, (tx) => enqueue(tx, { kind: "retention.purge", orgId: null, dedupeKey: `test:early-purge:${when.getTime()}`, runAt: new Date(when.getTime() - 3_600_000), maxAttempts: 1 }));
+    const order: string[] = [];
+    const fake = (name: string) => async () => { order.push(name); };
+    const stats = await tick(ctx, { registry: { "retention.purge": fake("housekeeping"), "storage.orphans": fake("housekeeping"), "outbox.process": fake("user-facing"), "reminders.scan": fake("user-facing") }, maxMs: 5000 });
+    expect(order.length).toBeGreaterThanOrEqual(3);
+    expect(order.indexOf("housekeeping")).toBeGreaterThan(order.lastIndexOf("user-facing"));
+    expect(stats.processed).toBe(order.length); // the two passes are counted together
+  });
+});
+
 describe("work that follows requests", () => {
   it("a kick delivers a pending change to the other person's notifications without any scheduler, and (switch off) nothing is e-mailed", async () => {
     await clearOutbox(c.admin);
@@ -250,5 +269,20 @@ describe("work that follows requests", () => {
       expect(await c.admin.select().from(jobs).where(eq(jobs.dedupeKey, `tick:${kind}:${Math.floor(when.getTime() / (secs * 1000))}`)), kind).toHaveLength(0);
     }
     expect(await c.admin.select().from(jobs).where(eq(jobs.dedupeKey, `tick:reminders.scan:${Math.floor(when.getTime() / 300_000)}`))).toHaveLength(1);
+    // the deadline e-mail is something people wait for, so a request-driven run queues it too (once per hour bucket)
+    expect(await c.admin.select().from(jobs).where(eq(jobs.dedupeKey, `tick:deadline.email:${Math.floor(when.getTime() / 3_600_000)}`))).toHaveLength(1);
+  });
+
+  it("the scheduler queues the deadline e-mail once an hour, however often it runs, even where no handler can run it", async () => {
+    const { ctx } = makeJobCtx(c.app);
+    const when = new Date(Date.now() + 1100 * 86_400_000); // a bucket nobody has used yet
+    ctx.now = () => when;
+    await tick(ctx, { registry: {}, maxMs: 1 });
+    await tick(ctx, { registry: {}, maxMs: 1 });
+    const key = `tick:deadline.email:${Math.floor(when.getTime() / 3_600_000)}`;
+    expect(await c.admin.select().from(jobs).where(eq(jobs.dedupeKey, key))).toHaveLength(1);
+    ctx.now = () => new Date(when.getTime() + 3_600_000); // the next hour is a new job
+    await tick(ctx, { registry: {}, maxMs: 1 });
+    expect(await c.admin.select().from(jobs).where(eq(jobs.dedupeKey, `tick:deadline.email:${Math.floor(when.getTime() / 3_600_000) + 1}`))).toHaveLength(1);
   });
 });

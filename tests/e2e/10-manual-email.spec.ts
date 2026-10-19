@@ -37,15 +37,22 @@ test("the bell shows an assignment by itself, and no e-mail about it is sent", a
   expect(mails().slice(before).filter((m) => m.to === "sam@e2e.test" && m.text.includes(TITLE))).toHaveLength(0);
 });
 
-test("an administrator sees what is waiting and sends it; the person gets the e-mail and nothing waits afterwards", async ({ page }) => {
+test("an administrator sees what is waiting and sends it; the person gets the e-mail (HTML) and the one-a-day deadline e-mail, and nothing waits afterwards", async ({ page }) => {
   await login(page, "admin@e2e.test");
+  // something of Sam's that is overdue by any calendar: the deadline e-mail must list it
+  const members = (await (await page.request.get(`/api/orgs/${acme()}/members`)).json()) as { members: { userId: string; email: string }[] };
+  const sam = members.members.find((m) => m.email === "sam@e2e.test")!;
+  const projects = (await (await page.request.get(`/api/orgs/${acme()}/projects`)).json()) as { projects: { id: string }[] };
+  const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
+  expect((await post(page, `/api/orgs/${acme()}/tasks`, { projectId: projects.projects[0]!.id, title: "Overdue for the deadline mail", primaryAssigneeId: sam.userId, dueDate: twoDaysAgo })).status()).toBe(201);
+
   await page.goto(`/o/${acme()}/settings`);
   const section = page.getByRole("region", { name: "Sending e-mails" });
   await expect(section).toBeVisible();
   await expect(section.getByRole("switch", { name: "Send notification e-mails automatically" })).not.toBeChecked();
   await expect(section.getByText(/each e-mail waits here until you press/i)).toBeVisible();
   await expect(section.getByText(/\d+ e-mail\(s\) waiting to be sent/)).toBeVisible();
-  expect((await waiting(page)).waiting).toBeGreaterThanOrEqual(1);
+  await expect.poll(async () => (await waiting(page)).waiting, { timeout: 45_000 }).toBeGreaterThanOrEqual(1);
   await expectAccessible(page, "settings: notifications with the e-mail sending card");
 
   const before = mails().length;
@@ -53,8 +60,23 @@ test("an administrator sees what is waiting and sends it; the person gets the e-
   await expect(page.getByText(/e-mail\(s\) are being sent/)).toBeVisible();
   const mail = await waitMail("sam@e2e.test", new RegExp(TITLE), before);
   expect(mail.subject).toContain(TITLE);
+  expect(mail.html.startsWith("<!doctype html>")).toBe(true); // every e-mail is HTML
+  expect(mail.html).toContain("<a href=");
+  expect(mail.text).toContain(TITLE); // with a plain-text twin
+
+  const deadline = await waitMail("sam@e2e.test", /Your unfinished tasks|งานที่ยังไม่เสร็จของคุณ/, before);
+  expect(deadline.html.startsWith("<!doctype html>")).toBe(true);
+  expect(deadline.html).toContain("Overdue for the deadline mail");
+  expect(deadline.subject).toMatch(/Unfinished tasks|งานที่ยังไม่เสร็จ/);
+  expect(mails().slice(before).filter((m) => m.to === "sam@e2e.test" && /Your unfinished tasks|งานที่ยังไม่เสร็จของคุณ/.test(m.text))).toHaveLength(1); // one, not one per task
+
   await expect.poll(async () => (await waiting(page)).waiting, { timeout: 20_000 }).toBe(0);
-  await expect(section.getByRole("button", { name: "Send waiting e-mails now" })).toBeDisabled({ timeout: 70_000 });
+  // pressing again the same day sends no second deadline e-mail
+  const again = mails().length;
+  await section.getByRole("button", { name: "Send waiting e-mails now" }).click();
+  await expect(page.getByText(/e-mail\(s\) are being sent/).first()).toBeVisible();
+  await page.waitForTimeout(4000);
+  expect(mails().slice(again).filter((m) => m.to === "sam@e2e.test" && /Your unfinished tasks|งานที่ยังไม่เสร็จของคุณ/.test(m.text))).toHaveLength(0);
 });
 
 test("a member sees the explanation but no button, the digests are switched off, and the API refuses them", async ({ page }) => {

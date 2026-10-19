@@ -5,7 +5,7 @@ import { withTenant } from "@/data/tenant";
 import { acceptInvitation, createInvitation, setMembershipStatus } from "@/data/account";
 import { eraseAccount } from "@/data/privacy";
 import { invitations, memberships, users } from "@/db/schema";
-import { addMember, connect, makeOrg, makeUser, systemRoleId } from "./helpers";
+import { addMember, connect, liftInviteAddressLimit, makeOrg, makeUser, systemRoleId } from "./helpers";
 
 const c = connect();
 afterAll(() => c.close());
@@ -50,6 +50,7 @@ describe("an invitation does not outlive the standing of the people it concerns"
     const eve = await person("eve");
     const m = await addMember(c.admin, O.org.id, eve.id, { role: "member" });
     const first = await withTenant(c.app, asBoss(), (s) => createInvitation(s, { email: eve.email, roleId: role }));
+    await liftInviteAddressLimit(c.admin); // a second invitation to one address within a quarter of an hour is refused (account.test.ts); this one is a fixture
     const second = await withTenant(c.app, asBoss(), (s) => createInvitation(s, { email: eve.email, roleId: role }));
     await acceptInvitation(c.app, eve, first.token);
     await withTenant(c.app, asBoss(), (s) => setMembershipStatus(s, { membershipId: m.id, status: "revoked" }));

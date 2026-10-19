@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { withTenant } from "@/data/tenant";
 import { changeStatus, createTask, setAssignees, updateTask } from "@/data/tasks";
 import { updateSettings } from "@/data/notifications";
-import { digestLog, notifications, users } from "@/db/schema";
+import { digestLog, jobs, notifications, users } from "@/db/schema";
 import { EmailError } from "@/integrations/email";
 import { digestRun } from "@/jobs/handlers/digest";
 import { remindersScan } from "@/jobs/handlers/reminders";
@@ -122,14 +122,17 @@ describe("overdue alerts", () => {
     expect((await notifsFor("ny", "task.overdue")).filter((n) => n.taskId === t.id)).toHaveLength(1);
   });
 
-  it("emails are queued for overdue (on by default) and delivered via the normal pipeline", async () => {
+  it("overdue and due-soon are in-app notifications; they are not e-mailed one task at a time (the daily deadline e-mail covers them)", async () => {
     const t = await mk({ dueDate: "2026-12-01", primaryAssigneeId: u.co!.id });
     const { ctx, clock, email } = makeJobCtx(c.app);
     clock.now = new Date("2026-12-03T05:00:00Z");
     await remindersScan(ctx, job);
     await pump(ctx, 1);
-    const mail = email.sent.find((m) => m.to.startsWith("co-") && m.text.includes(t.id));
-    expect(mail?.subject).toMatch(/overdue|เลยกำหนด/);
+    const n = (await notifsFor("co", "task.overdue")).find((x) => x.taskId === t.id)!;
+    expect(n.inApp).toBe(true);
+    expect(n.emailWanted).toBe(false);
+    expect(email.sent.some((m) => m.to.startsWith("co-") && m.text.includes(t.id) && /overdue|เลยกำหนด/.test(m.subject))).toBe(false); // (the e-mail about being assigned the task is a different one)
+    expect(await c.admin.select().from(jobs).where(eq(jobs.dedupeKey, `email:${n.id}`))).toHaveLength(0);
   });
 });
 
@@ -163,19 +166,104 @@ describe("digests", () => {
     expect(email.sent.length).toBe(n);
   });
 
-  it("is not sent before the local send time", async () => {
+  it("before the local send time a run serves yesterday's period once (so a once-a-day schedule reaches everyone), and never twice", async () => {
     const who = await makeUser(c.admin, "early");
     await addMember(c.admin, O.org.id, who.id, { role: "member" });
     await c.admin.update(users).set({ timezone: "Asia/Bangkok", locale: "en" }).where(eq(users.id, who.id));
-    await withTenant(c.app, { userId: who.id, orgId: O.org.id }, (s) => updateSettings(s, { digest: "daily" }));
+    // e-mail off for assignments, so the notification is one the digest is for (an e-mailed one is left out)
+    await withTenant(c.app, { userId: who.id, orgId: O.org.id }, (s) => updateSettings(s, { digest: "daily", settings: [{ channel: "email", event: "task.assigned", enabled: false }] }));
     const { ctx, clock, email } = makeJobCtx(c.app);
     const t = await mk({ title: "Early bird" });
     const { setAssignees: assign } = await import("@/data/tasks");
     await run("mgr", (s) => assign(s, t.id, { primary: who.id, co: [] }));
-    await c.admin.update(notifications).set({ emailedAt: null }).where(eq(notifications.userId, who.id));
-    clock.now = new Date("2026-06-22T00:30:00Z"); // 07:30 Bangkok
+    await pump(ctx, 1); // the notification exists once the outbox has been processed
+    const mine = () => email.sent.filter((m) => m.to.startsWith("early-"));
+    clock.now = new Date("2026-06-22T00:30:00Z"); // 07:30 Bangkok on the 22nd: the latest send time that has passed is the 21st's
     await digestRun(ctx, job);
-    expect(email.sent.filter((m) => m.to.startsWith("early-"))).toHaveLength(0);
+    expect(mine()).toHaveLength(1);
+    expect(mine()[0]!.html).toContain("Early bird");
+    expect((await c.admin.select().from(digestLog).where(eq(digestLog.userId, who.id))).map((r) => r.periodKey)).toEqual(["daily:2026-06-21"]);
+    await digestRun(ctx, job); // the same period again
+    expect(mine()).toHaveLength(1);
+    clock.now = new Date("2026-06-22T01:30:00Z"); // 08:30: a new period, nothing new in it
+    await digestRun(ctx, job);
+    expect(mine()).toHaveLength(1);
+  });
+
+  it("leaves out what is e-mailed one by one (even if that e-mail is still waiting), and waits out quiet hours", async () => {
+    const who = await makeUser(c.admin, "quietdigest");
+    await addMember(c.admin, O.org.id, who.id, { role: "member" });
+    await c.admin.update(users).set({ timezone: "Asia/Bangkok", locale: "en" }).where(eq(users.id, who.id));
+    // e-mail stays ON for assignments: the notification is wanted by e-mail, so it belongs to that e-mail and not to the digest
+    await withTenant(c.app, { userId: who.id, orgId: O.org.id }, (s) => updateSettings(s, { digest: "daily", quietStart: "22:00", quietEnd: "07:00" }));
+    const { ctx, clock, email } = makeJobCtx(c.app);
+    const t = await mk({ title: "Emailed on its own" });
+    const { setAssignees: assign } = await import("@/data/tasks");
+    await run("mgr", (s) => assign(s, t.id, { primary: who.id, co: [] }));
+    await pump(ctx, 1);
+    await c.admin.update(notifications).set({ emailedAt: null, digestedAt: null }).where(eq(notifications.userId, who.id)); // as if that e-mail were still waiting
+    const mine = () => email.sent.filter((m) => m.to.startsWith("quietdigest-"));
+    const before = mine().length; // (the individual e-mail of the assignment, sent by the pump)
+    clock.now = new Date("2026-06-22T01:30:00Z"); // 08:30 Bangkok on the 22nd
+    await digestRun(ctx, job);
+    expect(mine()).toHaveLength(before); // its own e-mail is its channel; the digest does not repeat it
+
+    // a notification with no individual e-mail does reach the digest, but not during quiet hours
+    await withTenant(c.app, { userId: who.id, orgId: O.org.id }, (s) => updateSettings(s, { settings: [{ channel: "email", event: "task.commented", enabled: false }] }));
+    const { addComment } = await import("@/data/tasks");
+    await run("mgr", (s) => addComment(s, t.id, { body: "plain comment" }));
+    await pump(ctx, 1);
+    clock.now = new Date("2026-06-23T16:00:00Z"); // 23:00 Bangkok: inside quiet hours
+    await digestRun(ctx, job);
+    expect(mine()).toHaveLength(before);
+    expect(await c.admin.select().from(digestLog).where(and(eq(digestLog.userId, who.id), eq(digestLog.periodKey, "daily:2026-06-23")))).toHaveLength(0); // the period was not used up
+    clock.now = new Date("2026-06-24T01:00:00Z"); // 08:00 the next morning
+    await digestRun(ctx, job);
+    expect(mine()).toHaveLength(before + 1);
+    const digest = mine().at(-1)!;
+    expect(digest.idempotencyKey).toMatch(/^digest-/);
+    expect(digest.html).toContain("commented");
+    expect(digest.html).not.toContain("assigned you");
+  });
+
+  it("does not repeat in the digest what the deadline e-mail lists; keeps reminders set further ahead, and everything for someone who switched that e-mail off", async () => {
+    const mkUser = async (name: string) => {
+      const who = await makeUser(c.admin, name);
+      await addMember(c.admin, O.org.id, who.id, { role: "member" });
+      await c.admin.update(users).set({ timezone: "Asia/Bangkok", locale: "en" }).where(eq(users.id, who.id));
+      return who;
+    };
+    const on = await mkUser("covon");
+    const off = await mkUser("covoff");
+    await withTenant(c.app, { userId: on.id, orgId: O.org.id }, (s) => updateSettings(s, { digest: "daily" }));
+    await withTenant(c.app, { userId: off.id, orgId: O.org.id }, (s) => updateSettings(s, { digest: "daily", settings: [{ channel: "email", event: "task.due_soon", enabled: false }, { channel: "email", event: "task.overdue", enabled: false }] }));
+    const today = await mk({ title: "CovToday", dueDate: "2026-07-06", reminderDaysBefore: 0, primaryAssigneeId: on.id, coAssigneeIds: [off.id] });
+    const tomorrow = await mk({ title: "CovTomorrow", dueDate: "2026-07-07", reminderDaysBefore: 1, primaryAssigneeId: on.id, coAssigneeIds: [off.id] });
+    const ahead = await mk({ title: "CovAhead", dueDate: "2026-07-09", reminderDaysBefore: 3, primaryAssigneeId: on.id, coAssigneeIds: [off.id] });
+    const late = await mk({ title: "CovLate", dueDate: "2026-07-04", primaryAssigneeId: on.id, coAssigneeIds: [off.id] });
+    const { ctx, clock, email } = makeJobCtx(c.app);
+    clock.now = new Date("2026-07-06T03:00:00Z"); // 10:00 on the 6th in Bangkok
+    await pump(ctx, 1);
+    await remindersScan(ctx, job);
+    const types = async (id: string) => (await c.admin.select().from(notifications).where(and(eq(notifications.orgId, O.org.id), eq(notifications.userId, id)))).map((n) => `${n.type}:${n.taskId}`);
+    for (const id of [on.id, off.id]) expect(await types(id)).toEqual(expect.arrayContaining([`task.due_soon:${today.id}`, `task.due_soon:${tomorrow.id}`, `task.due_soon:${ahead.id}`, `task.overdue:${late.id}`]));
+
+    await digestRun(ctx, job);
+    const digestOf = (prefix: string) => email.sent.filter((m) => m.to.startsWith(prefix) && /digest/i.test(m.subject));
+    // listed in the deadline e-mail (due today or tomorrow, overdue): not said twice; the reminder for a task due in three days is not in it
+    expect(digestOf("covon-")).toHaveLength(1);
+    const kept = digestOf("covon-")[0]!;
+    expect(kept.html).toContain("CovAhead");
+    expect(kept.html).not.toContain("CovToday");
+    expect(kept.html).not.toContain("CovTomorrow");
+    expect(kept.html).not.toContain("CovLate");
+    // switched e-mail off for those kinds: the deadline e-mail will not list them, so the digest is where they appear
+    expect(digestOf("covoff-")).toHaveLength(1);
+    const all = digestOf("covoff-")[0]!;
+    for (const title of ["CovAhead", "CovToday", "CovTomorrow", "CovLate"]) expect(all.html, title).toContain(title);
+    // the button opens the person's own tasks, a page that exists
+    expect(kept.html).toContain(`href="http://localhost:3000/o/${O.org.id}/my-tasks"`);
+    expect(kept.text).toContain(`http://localhost:3000/o/${O.org.id}/my-tasks`);
   });
 
   it("a failed send rolls the period claim back so the next run retries; no duplicate after success", async () => {

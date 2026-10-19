@@ -90,7 +90,7 @@ function EmailSending({ onChanged }: { onChanged: () => void }) {
     setBusy(true);
     try {
       const r = await api<{ queued: number; more: boolean }>(`/api/orgs/${orgId}/notification-emails`, { method: "POST" });
-      toast(`${t("ui.emails_queued", { n: String(r.queued) })}${r.more ? ` ${t("ui.emails_more")}` : ""}`);
+      toast(`${t("ui.emails_queued", { n: String(r.queued) })} ${t("ui.deadline_started")}${r.more ? ` ${t("ui.emails_more")}` : ""}`);
       w.reload();
     } catch (e) { toast(err(e), "error"); } finally { setBusy(false); }
   }
@@ -111,7 +111,7 @@ function EmailSending({ onChanged }: { onChanged: () => void }) {
       {(!auto || waiting > 0) && (
         <div className="row">
           <span aria-live="polite">{t("ui.emails_waiting", { n: String(waiting) })}</span>
-          <Btn kind="primary" onClick={() => void send()} disabled={busy || waiting === 0}>{t("ui.send_waiting_emails")}</Btn>
+          <Btn kind="primary" onClick={() => void send()} disabled={busy}>{t("ui.send_waiting_emails")}</Btn>
         </div>
       )}
     </section>
@@ -145,6 +145,7 @@ function NotificationSettings() {
           ))}
         </tbody>
       </table></TableWrap>
+      <p className="muted small">{t("ui.deadline_email_hint")}</p>
       <div className="card grid cols-3">
         <Field label={t("ui.digest")}>{(id) => (
           <select id={id} value={s.digest} disabled={!s.autoEmail} onChange={(e) => void put({ digest: e.target.value })}><option value="off">{t("ui.digest_off")}</option><option value="daily">{t("ui.digest_daily")}</option><option value="weekly">{t("ui.digest_weekly")}</option></select>

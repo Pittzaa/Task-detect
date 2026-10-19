@@ -2,11 +2,14 @@ import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { twoFactor } from "better-auth/plugins";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@/db/client";
 import { authAccounts, authRateLimits, authSessions, authTwoFactor, authVerifications, users } from "@/db/schema";
 import type { EmailSender } from "@/integrations/email";
+import { renderEmail } from "@/integrations/email/templates";
+import { refundRateLimit } from "./rate-limit";
+import { resetKey, verifyKey } from "./auth-throttle";
 import { DEFAULT_LOCALE, isLocale, t, type Locale } from "@/i18n";
 import { describeError } from "@/lib/error-report";
 import { logger } from "@/lib/logger";
@@ -88,26 +91,46 @@ export function createAuth(deps: AuthDeps) {
       requireEmailVerification: true,
       minPasswordLength: 12,
       maxPasswordLength: 128,
-      resetPasswordTokenExpiresIn: 60 * 60,
+      resetPasswordTokenExpiresIn: 2 * 60 * 60, // as long as the wait before another reset e-mail may be requested (auth-throttle.ts)
       revokeSessionsOnPasswordReset: true,
+      // Using the link ends the wait for the next one: the person who typed a new password wrongly, or lost it again, can ask at once (the hook only
+      // runs for the holder of the single-use token).
+      onPasswordReset: async ({ user }) => {
+        await db.execute(sql`delete from app_rate_limits where key = ${resetKey(user.email)}`).catch(() => undefined);
+      },
       sendResetPassword: async ({ user, url }) => {
         const locale = localeOf(user as { locale?: unknown });
-        await email.send({
-          to: user.email,
-          subject: t(locale, "email.reset.subject", { app }),
-          text: t(locale, "email.reset.body", { name: user.name, url }),
+        const { html, text } = renderEmail({
+          locale,
+          heading: t(locale, "email.reset.heading"),
+          intro: [t(locale, "email.reset.intro", { name: user.name }), t(locale, "email.reset.ignore")],
+          button: { label: t(locale, "email.reset.button"), url },
         });
+        try {
+          await email.send({ to: user.email, subject: t(locale, "email.reset.subject", { app }), text, html });
+        } catch (e) {
+          // nothing was sent, so the allowance is not spent (Better Auth only logs this and still answers 200)
+          await refundRateLimit(db, resetKey(user.email)).catch(() => undefined);
+          throw e;
+        }
       },
     },
     emailVerification: {
       sendOnSignUp: true,
       sendVerificationEmail: async ({ user, url }) => {
         const locale = localeOf(user as { locale?: unknown });
-        await email.send({
-          to: user.email,
-          subject: t(locale, "email.verify.subject", { app }),
-          text: t(locale, "email.verify.body", { name: user.name, url }),
+        const { html, text } = renderEmail({
+          locale,
+          heading: t(locale, "email.verify.heading"),
+          intro: [t(locale, "email.verify.intro", { name: user.name })],
+          button: { label: t(locale, "email.verify.button"), url },
         });
+        try {
+          await email.send({ to: user.email, subject: t(locale, "email.verify.subject", { app }), text, html });
+        } catch (e) {
+          await refundRateLimit(db, verifyKey(user.email)).catch(() => undefined);
+          throw e;
+        }
       },
     },
     socialProviders: deps.google ? { google: { clientId: deps.google.clientId, clientSecret: deps.google.clientSecret } } : {},

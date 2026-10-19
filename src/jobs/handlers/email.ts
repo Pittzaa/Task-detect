@@ -3,10 +3,15 @@ import { and, eq } from "drizzle-orm";
 import { deliveryAttempts, memberships, notificationPrefs, notifications } from "@/db/schema";
 import { quietHoursEnd } from "@/domain/notifications";
 import { EmailError } from "@/integrations/email";
+import { renderEmail } from "@/integrations/email/templates";
 import { t } from "@/i18n";
 import { withWorkerOrg } from "../context";
+import { refundRateLimit, takeRateLimit } from "@/server/rate-limit";
 import { loadProfiles, renderNotification } from "../notify";
 import { Deferred, PermanentFailure, type JobHandler } from "../worker";
+
+/** One person is sent at most this many notification e-mails an hour; the rest wait for the next hour (nothing is dropped). */
+export const RECIPIENT_EMAILS_PER_HOUR = 20;
 
 /**
  * Sends one notification email. Everything is decided at delivery time, not when the job was queued:
@@ -45,10 +50,21 @@ export const notificationEmail: JobHandler = async (ctx, job) => {
 
   // 2) Send. Idempotency-Key makes a retry after an ambiguous failure safe at the provider.
   const { to, locale, text, taskId } = plan.send;
+  // a burst (thirty tasks assigned at once) does not become thirty e-mails in an hour; "not now" does not count as a failed try
+  const cap = await takeRateLimit(ctx.db, `mail:notify:${plan.send.userId}`, 3600, RECIPIENT_EMAILS_PER_HOUR);
+  if (!cap.allowed) throw new Deferred(cap.resetAt, "recipient_hourly_cap");
   const link = taskId ? taskLink(ctx.appUrl, orgId, taskId) : ctx.appUrl;
   try {
-    await ctx.email.send({ to, subject: t(locale, "email.notification.subject", { app: t(locale, "app.name"), title: text }), text: `${text}\n\n${link}`, idempotencyKey: `notification-${notificationId}` });
+    const mail = renderEmail({
+      locale,
+      preheader: text,
+      heading: text,
+      button: { label: t(locale, "email.notification.button"), url: link },
+      footer: [t(locale, "email.notification.footer")],
+    });
+    await ctx.email.send({ to, subject: t(locale, "email.notification.subject", { app: t(locale, "app.name"), title: text }), text: mail.text, html: mail.html, idempotencyKey: `notification-${notificationId}` });
   } catch (e) {
+    await refundRateLimit(ctx.db, `mail:notify:${plan.send.userId}`).catch(() => undefined); // a failed try does not use up the person's hourly allowance
     await withWorkerOrg(ctx.db, orgId, (tx) => tx.insert(deliveryAttempts).values({ orgId, channel: "email", subjectId: notificationId, status: "failed", detail: e instanceof EmailError ? (e.retryable ? "retryable" : "rejected") : "error" }));
     if (e instanceof EmailError && !e.retryable) throw new PermanentFailure("EmailRejected");
     throw e;

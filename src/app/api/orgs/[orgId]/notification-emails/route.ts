@@ -19,9 +19,7 @@ export const GET = (req: Request, { params }: P) =>
 export const POST = (req: Request, { params }: P) =>
   handle(req, async (c) => {
     const r = await c.tenant((await params).orgId, (s) => queueWaitingEmails(s));
-    if (r.queued) {
-      const ctx = c.rt.jobContext();
-      try { after(() => runWorker(ctx, { "notification.email": registry["notification.email"]! }, { maxMs: 40_000 }).catch(() => undefined)); } catch { /* not inside a request */ }
-    }
+    const ctx = c.rt.jobContext();
+    try { after(() => runWorker(ctx, { "notification.email": registry["notification.email"]!, "deadline.email": registry["deadline.email"]! }, { maxMs: 40_000 }).catch(() => undefined)); } catch { /* not inside a request */ }
     return r;
   }, { limit: { name: "send-waiting-emails", windowSeconds: 60, max: 6 } });

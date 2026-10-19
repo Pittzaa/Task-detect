@@ -73,6 +73,7 @@ See [ERD.md](ERD.md) (generated from the migrated database): 42 tables, 74 forei
 |---|---|---|
 | `outbox.process` | 60 s | Turn committed domain events into notifications and downstream jobs. |
 | `reminders.scan` | 5 min | Due-soon and overdue reminders at 09:00 in the assignee’s own zone. |
+| `deadline.email` | 1 h | One e-mail per person per day (from 09:00 local) listing their unfinished tasks that are overdue, due today or due tomorrow in their own calendar (at most 30 shown, the rest counted); nobody without such a task is e-mailed. Only for organizations with automatic e-mail on, or for the one organization an administrator presses "send waiting e-mails" in. |
 | `digest.run` | 1 h | Daily/weekly digests respecting each user’s zone and quiet hours. Only for organizations with automatic e-mail switched on. |
 | `series.generate` | 1 h | Top up recurring-task occurrences (30-day horizon, never backfilling the past). |
 | `calendar.reconcile` | 24 h | Detect drift between tasks and calendar links. |
@@ -83,7 +84,7 @@ See [ERD.md](ERD.md) (generated from the migrated database): 42 tables, 74 forei
 
 **Automatic e-mail is a per-organization switch** (`organizations.auto_email`, Settings → Notifications, default off). Notifications in the app are created the same way either way. With the switch on, `deliverToUsers` queues the `notification.email` job as soon as the notification exists, and `digest.run` serves the organization. With it off, the e-mail is only recorded (`notifications.email_wanted`) until an administrator presses "send waiting e-mails" (`src/data/notification-emails.ts`, `POST /api/orgs/:id/notification-emails`), which queues the same jobs under the same dedupe keys, so nothing is ever sent twice, whichever way it was queued.
 
-A job’s dedupe key includes its time bucket, so overlapping ticks enqueue it once. Handlers are idempotent and re-check permissions before touching protected content.
+A job’s dedupe key includes its time bucket, so overlapping ticks enqueue it once. A tick drains the user-facing kinds first (`USER_FACING_KINDS` in `src/jobs/registry.ts`; at most 60 % of the run when housekeeping follows) and then only the housekeeping kinds (digests, sweeps) in the time left, so a single short run a day still delivers and housekeeping always gets a turn; handlers that can run long stop at the run's deadline (`JobContext.deadline`). Digest periods mean the latest send time that has passed (yesterday's before 08:00 local), so a once-a-day run at any hour normally serves each time zone once a day; across a clock change one run can skip or repeat a period, and the content window (3 days for daily, 9 for weekly) is wider than that, so what a skipped period would have held normally appears in the next digest (not guaranteed beyond that window). E-mails respect each person's quiet hours (notification e-mails, deadline e-mails and digests alike). Handlers are idempotent and re-check permissions before touching protected content.
 Back-off: 30 s doubling to 1 h with jitter; `maxAttempts` then *dead*; a handler may `Deferred` (no attempt consumed) or `PermanentFailure`.
 
 ## Observability

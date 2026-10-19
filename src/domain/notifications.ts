@@ -53,18 +53,19 @@ export function quietHoursEnd(now: Date, tz: string, start: string, end: string)
   return localToUtc(endDate, eh, em, tz);
 }
 
-/** Key identifying the digest period a local moment belongs to, or null if this period's send time has not arrived. */
-export function digestPeriod(now: Date, tz: string, frequency: "daily" | "weekly", sendHour = 8): { key: string; startsAt: Date } | null {
+/**
+ * The digest period a moment belongs to: the latest one whose send time (`sendHour`, the user's local time) has passed. Before today's
+ * send time that is yesterday's (daily) or, on a Monday morning, last week's (weekly). So a scheduler that runs once a day at a fixed hour
+ * (Vercel Hobby) still serves every period of every time zone, a little late where that hour is before 08:00 local. digest_log keeps
+ * it to one e-mail per period.
+ */
+export function digestPeriod(now: Date, tz: string, frequency: "daily" | "weekly", sendHour = 8): { key: string; startsAt: Date } {
   const today = dateInZone(now, tz);
   const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", hourCycle: "h23" }).format(now));
-  if (frequency === "daily") {
-    if (hour < sendHour) return null;
-    return { key: `daily:${today}`, startsAt: localToUtc(today, sendHour, 0, tz) };
-  }
-  // weekly: Monday at sendHour; later in the week still belongs to that Monday's period (catch-up after downtime)
-  const weekday = new Date(`${today}T00:00:00Z`).getUTCDay(); // 0 = Sunday
-  const mondayOffset = (weekday + 6) % 7;
-  const monday = addDays(today, -mondayOffset);
-  if (mondayOffset === 0 && hour < sendHour) return null;
+  const day = hour < sendHour ? addDays(today, -1) : today; // the local date of the latest send time that has passed
+  if (frequency === "daily") return { key: `daily:${day}`, startsAt: localToUtc(day, sendHour, 0, tz) };
+  // weekly: Monday at sendHour; the rest of the week, up to the next Monday's send time, belongs to that Monday's period
+  const weekday = new Date(`${day}T00:00:00Z`).getUTCDay(); // 0 = Sunday
+  const monday = addDays(day, -((weekday + 6) % 7));
   return { key: `weekly:${monday}`, startsAt: localToUtc(monday, sendHour, 0, tz) };
 }

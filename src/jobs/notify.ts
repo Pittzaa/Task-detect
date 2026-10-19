@@ -141,6 +141,8 @@ export async function renderNotification(tx: Tx, orgId: string, n: RenderInput, 
 const statusLabel = (l: Locale, v?: string) => (v ? t(l, `status.${v}` as never) : "");
 const priorityLabel = (l: Locale, v?: string) => (v ? t(l, `priority.${v}` as never) : "");
 
+const COMBINED_EMAIL: ReadonlySet<NotificationType> = new Set<NotificationType>(["task.due_soon", "task.overdue"]);
+
 /** Whether the organization has switched on automatic e-mail (Settings -> Notifications). Read where the work starts, once per event or scan. */
 export async function orgAutoEmail(tx: Tx, orgId: string): Promise<boolean> {
   const [o] = await tx.select({ auto: organizations.autoEmail }).from(organizations).where(eq(organizations.id, orgId));
@@ -162,7 +164,8 @@ export async function deliverToUsers(
   const candidates = [...new Set(o.userIds)].filter((u) => u !== o.actorId);
   const readers = [...(await readersOf(tx, o.orgId, o.task, candidates))];
   const inApp = await enabledUsers(tx, o.orgId, readers, "in_app", o.type);
-  const email = await enabledUsers(tx, o.orgId, readers, "email", o.type);
+  // Due-soon and overdue reminders are not e-mailed one task at a time: they are combined into one e-mail a day (handlers/deadline.ts).
+  const email = COMBINED_EMAIL.has(o.type) ? new Set<string>() : await enabledUsers(tx, o.orgId, readers, "email", o.type);
   let created = 0;
   for (const userId of readers) {
     if (!inApp.has(userId) && !email.has(userId)) continue;

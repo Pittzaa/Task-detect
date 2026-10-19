@@ -7,8 +7,8 @@ Everything here was run on the release candidate; the exact results are in [READ
 ```bash
 pnpm lint                      # ESLint (React hooks rules included)
 pnpm typecheck                 # tsc --noEmit
-pnpm test:unit                 # 288 tests, no database
-TEST_DATABASE_URL=postgres://postgres@127.0.0.1:54329/tasktracker_test pnpm test:integration   # 534 tests
+pnpm test:unit                 # 303 tests, no database
+TEST_DATABASE_URL=postgres://postgres@127.0.0.1:54329/tasktracker_test pnpm test:integration   # 574 tests
 pnpm test:e2e                  # builds, then 101 browser tests (Chromium) against a production build
 pnpm test:e2e:browsers         # the same suite once per engine (chromium, firefox, webkit); the last two have never been run
 pnpm load                      # load test against a production build with seeded volume (see below)
@@ -80,6 +80,8 @@ Local PostgreSQL for the tests (no Docker needed): a PostgreSQL 16 cluster on po
 | Org import `--replace` without keeping the live registration switch | 1 test failed |
 | Registration column grant: no grant; whole-table `UPDATE` grant; policy `USING (true)` | the same 1 test failed each time (`owner-role.test.ts`); `pnpm verify:database` also fails (14/15) when the grant is revoked |
 | E-mail sending: queue the e-mail whatever the switch says; read the switch as always on; read it as always off; digests ignore the switch; no permission check on the switch; no permission check on "send waiting"; no 7-day window; `tick` queues kinds the request-driven runner cannot run; org import `--replace` without keeping the live switch | 7, 7, 1, 1, 3, 4, 1, 1 and 1 tests failed; `pnpm verify:database` fails (14/15) when the column grant for `auto_email` is revoked |
+| HTML e-mails and e-mail limits: back to per-task due/overdue e-mails; no recipient cap (20 an hour); reset allowed 5 times; verification allowed 9 times; no per-address invitation limit; unescaped paragraph text in the template; any URL scheme in a link; once-a-day run order (user-facing first); digest period without catch-up | 1, 1, 2, 1, 1, 1, 2, 1 and 3 tests failed |
+| Deadline e-mail: no readability check; no period claim; ignore the person's e-mail choices; ignore quiet hours; a window wider than today/tomorrow | 1, 3, 1, 1 and 3 tests failed |
 | Deleting structure: no permission check on a department; team delete without the department scope; keep a team's role assignments; leave a project's tasks undeleted | 13, 1, 2 and 1 tests failed |
 
 ## Bugs the test suites found while being written (all fixed)

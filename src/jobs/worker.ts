@@ -31,6 +31,8 @@ export interface JobContext {
   fetchImpl: typeof fetch;
   google?: { clientId: string; clientSecret: string; tokenUrl?: string; apiBase?: string; redirectUri: string };
   now: () => Date;
+  /** Epoch ms by which the run that is calling the handler wants to be finished (set by runWorker). Long handlers stop early at it. */
+  deadline?: number;
 }
 
 export type JobHandler = (ctx: JobContext, job: JobRow) => Promise<void>;
@@ -68,7 +70,7 @@ export async function runWorker(ctx: JobContext, registry: Registry, o: { maxMs?
       const handler = registry[job.kind];
       try {
         if (!handler) throw new PermanentFailure("UnknownJobKind"); // unreachable: only registry kinds are claimed
-        await withTimeout(handler(ctx, job), jobTimeoutMs);
+        await withTimeout(handler({ ...ctx, deadline }, job), jobTimeoutMs);
         await completeJob(ctx.db, job, ctx.now());
         stats.succeeded++;
       } catch (e) {

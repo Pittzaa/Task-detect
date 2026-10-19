@@ -25,13 +25,14 @@ function LoginForm() {
     : redirected ? { kind: "error", text: /registration_closed/i.test(redirected) ? t("error.registration_closed") : t("ui.signin_failed_redirect") }
     : undefined));
   const [busy, setBusy] = useState(false);
+  const [needsVerify, setNeedsVerify] = useState(false);
   const [google, setGoogle] = useState(false);
 
   useEffect(() => { void api<{ google?: boolean }>("/api/auth-config").then((c) => setGoogle(!!c.google)).catch(() => undefined); }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true); setMessage(undefined);
+    setBusy(true); setMessage(undefined); setNeedsVerify(false);
     try {
       if (needsCode) {
         await authApi(useBackup ? "/two-factor/verify-backup-code" : "/two-factor/verify-totp", { code: code.trim() });
@@ -41,8 +42,21 @@ function LoginForm() {
       }
       router.replace(safeNext(params.get("next")));
     } catch (e2) {
-      if (e2 instanceof ApiError && e2.status === 403) setMessage({ kind: "warn", text: t("ui.verify_needed") });
+      if (e2 instanceof ApiError && e2.status === 403) { setMessage({ kind: "warn", text: t("ui.verify_needed") }); setNeedsVerify(true); }
       else setMessage({ kind: "error", text: e2 instanceof ApiError && e2.status === 401 ? t("error.unauthenticated") : err(e2) });
+    } finally { setBusy(false); }
+  }
+
+  // one e-mail per address every 10 minutes (the server enforces it); the answer never says whether the address has an account
+  async function resendVerification() {
+    if (!email.trim()) return;
+    setBusy(true);
+    try {
+      await authApi("/send-verification-email", { email: email.trim(), callbackURL: "/login?verified=1" });
+      setMessage({ kind: "success", text: t("ui.verify_resent") });
+      setNeedsVerify(false);
+    } catch (e3) {
+      setMessage(e3 instanceof ApiError && e3.status === 429 ? { kind: "warn", text: t("ui.verify_limited") } : { kind: "error", text: err(e3) });
     } finally { setBusy(false); }
   }
 
@@ -55,6 +69,7 @@ function LoginForm() {
     <AuthLayout title={t("ui.signin")} footer={<>{t("ui.no_account")} <Link href="/register">{t("ui.register")}</Link></>}>
       <form onSubmit={submit} noValidate>
         {message && <Notice kind={message.kind}>{message.text}</Notice>}
+        {needsVerify && <p><Btn type="button" onClick={() => void resendVerification()} disabled={busy}>{t("ui.verify_resend")}</Btn></p>}
         {!needsCode ? (
           <>
             <Field label={t("ui.email")}>{(id) => <input id={id} type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />}</Field>

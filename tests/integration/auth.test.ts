@@ -37,6 +37,8 @@ describe("email/password authentication", () => {
     const mail = app.email.sent.find((m) => m.to === email);
     expect(mail).toBeDefined();
     expect(mail!.subject).toContain("Task Tracker");
+    expect(mail!.html).toMatch(/<a href="[^"]*verify-email[^"]*"/); // HTML with a button, and the text twin carries the same link
+    expect(mail!.html).toContain("<!doctype html>");
     const blocked = await cl.authCall("POST", "/sign-in/email", { email, password: PASSWORD });
     expect(blocked.status).toBe(403);
     expect(cl.cookies.size).toBe(0);
@@ -73,6 +75,9 @@ describe("email/password authentication", () => {
     const mail = app.email.sent.at(-1)!;
     expect(mail.to).toBe(email);
     const token = new URL(linkIn(mail.text)).pathname.split("/").pop()!;
+    expect(mail.html).toContain(token);
+    expect(mail.html).toMatch(/<a href="[^"]*reset-password\/[^"]*"/);
+    expect(mail.html).toMatch(/2 hours|2 ชั่วโมง/); // the link lasts as long as the wait before the next one may be asked for
     const fresh = new Client(app.auth);
     const NEW = "brand-new-password-77";
     expect((await fresh.authCall("POST", "/reset-password", { newPassword: NEW, token })).status).toBe(200);

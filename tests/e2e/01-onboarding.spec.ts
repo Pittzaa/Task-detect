@@ -23,6 +23,13 @@ test("registration requires email verification before sign-in", async ({ page })
   await attemptLogin(page, "early@e2e.test");
   await expect(page.getByText(/verify your email/i)).toBeVisible();
   await expect(page).toHaveURL(/\/login/);
+  // the notice offers a new link instead of claiming one was sent; one per address every ten minutes
+  await page.getByRole("button", { name: "Send the verification link again" }).click();
+  await expect(page.getByText(/a new link has been sent/i)).toBeVisible();
+  await expect.poll(() => mails().slice(before).filter((m) => m.to === "early@e2e.test" && /verify-email/.test(m.text)).length).toBe(2);
+  await attemptLogin(page, "early@e2e.test");
+  await page.getByRole("button", { name: "Send the verification link again" }).click();
+  await expect(page.getByText(/once every 10 minutes/i)).toBeVisible();
   const mail = await waitMail("early@e2e.test", /verify-email/, before);
   await page.goto(linkIn(mail));
   await login(page, "early@e2e.test");

@@ -7,6 +7,7 @@ import { getSettings, listNotifications, markRead, unreadCount, updateSettings }
 import { AppError } from "@/lib/errors";
 import { deliveryAttempts, jobs, memberships, notificationPrefs, notifications, outboxEvents, users } from "@/db/schema";
 import { EmailError } from "@/integrations/email";
+import { RECIPIENT_EMAILS_PER_HOUR } from "@/jobs/handlers/email";
 import { addMember, connect, makeOrg, makeUser } from "./helpers";
 import { clearOutbox, makeJobCtx, pump, resetEvent } from "./jobs-helpers";
 
@@ -50,6 +51,44 @@ describe("assignment notifications", () => {
     const thMail = email.sent.find((m) => m.to.startsWith("mem2-"))!; // mem2 defaults to Thai
     expect(thMail.subject).toMatch(/[฀-๿]/);
     expect(thMail.subject).toContain("Prepare launch");
+  });
+
+  it("the e-mail is HTML and a hostile task title cannot become markup in it", async () => {
+    const { ctx, email } = makeJobCtx(c.app);
+    const title = `Fix <img src=x onerror=alert(1)> & "quote" 'q'`;
+    const t = await mkTask("mgr", { title });
+    await run("mgr", (s) => setAssignees(s, t.id, { primary: u.mem1!.id, co: [] }));
+    await pump(ctx);
+    const mail = email.sent.find((m) => m.to.startsWith("mem1-") && m.text.includes("onerror"))!;
+    expect(mail.html.startsWith("<!doctype html>")).toBe(true);
+    expect(mail.html).not.toContain("<img");
+    expect(mail.html).toContain("Fix &lt;img src=x onerror=alert(1)&gt; &amp; &quot;quote&quot; &#39;q&#39;");
+    expect(mail.html).toContain(`/o/${O.org.id}/tasks?task=${t.id}`);
+    expect(mail.text).toContain(title); // the plain-text twin is plain
+  });
+
+  it("one person is sent at most twenty notification e-mails an hour: the rest wait for the next hour and are sent then, none lost", async () => {
+    const burst = await makeUser(c.admin, "burst");
+    await c.admin.update(users).set({ locale: "en" }).where(eq(users.id, burst.id));
+    await addMember(c.admin, O.org.id, burst.id, { role: "member" });
+    const { ctx, clock, email } = makeJobCtx(c.app);
+    const total = RECIPIENT_EMAILS_PER_HOUR + 5;
+    for (let i = 0; i < total; i++) {
+      const t = await mkTask("mgr", { title: `Burst ${i}` });
+      await run("mgr", (s) => setAssignees(s, t.id, { primary: burst.id, co: [] }));
+    }
+    await pump(ctx);
+    expect(email.sent.filter((m) => m.to === burst.email)).toHaveLength(RECIPIENT_EMAILS_PER_HOUR);
+    const waiting = await c.admin.select().from(jobs).where(and(eq(jobs.kind, "notification.email"), eq(jobs.status, "pending"), sql`${jobs.payload}->>'notificationId' in (select id::text from notifications where user_id = ${burst.id})`));
+    expect(waiting).toHaveLength(5); // deferred, not failed: their attempts are not used up
+    expect(waiting.every((j) => j.runAt.getTime() > Date.now() && j.attempts === 0)).toBe(true);
+    // an hour on (the window is moved back instead of waiting for it)
+    await c.admin.execute(sql`update app_rate_limits set window_start = now() - interval '2 hours' where key = ${`mail:notify:${burst.id}`}`);
+    clock.now = new Date(Date.now() + 2 * 3_600_000);
+    await pump(ctx);
+    const all = email.sent.filter((m) => m.to === burst.email);
+    expect(all).toHaveLength(total);
+    expect(new Set(all.map((m) => m.subject)).size).toBe(total);
   });
 
   it("is idempotent: reprocessing the same event creates no second notification and no second email", async () => {
@@ -208,6 +247,24 @@ describe("email delivery behaviour", () => {
     expect(job!.status).toBe("succeeded");
     expect(email.sent.slice(before).filter((m) => m.to.startsWith("mem1-"))).toHaveLength(1);
     expect(email.sent.at(-1)!.idempotencyKey).toBe(`notification-${nid!.id}`);
+  });
+
+  it("a try that fails does not use up the person's hourly allowance (only delivered e-mail counts)", async () => {
+    const who = await makeUser(c.admin, "capref");
+    await addMember(c.admin, O.org.id, who.id, { role: "member" });
+    const clock = { now: new Date() };
+    const { ctx, email } = makeJobCtx(c.app, { clock });
+    const count = async () => Number(((await c.admin.execute(sql`select count from app_rate_limits where key = ${`mail:notify:${who.id}`}`)) as unknown as { rows: { count: number }[] }).rows[0]?.count ?? 0);
+    const t = await mkTask("mgr");
+    await run("mgr", (s) => setAssignees(s, t.id, { primary: who.id, co: [] }));
+    email.failNext = new EmailError("provider down", true);
+    await pump(ctx, 1);
+    expect(email.sent.filter((m) => m.to === who.email)).toHaveLength(0);
+    expect(await count()).toBe(0); // taken for the try, given back because nothing was sent
+    clock.now = new Date(clock.now.getTime() + 120_000);
+    await pump(ctx, 1);
+    expect(email.sent.filter((m) => m.to === who.email)).toHaveLength(1);
+    expect(await count()).toBe(1);
   });
 
   it("a provider rejection (bad address) is recorded and not retried", async () => {

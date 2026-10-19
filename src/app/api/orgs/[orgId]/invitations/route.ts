@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { createInvitation, listInvitations } from "@/data/account";
+import { createInvitation, inviteAddressKey, listInvitations } from "@/data/account";
+import { refundRateLimit } from "@/server/rate-limit";
+import { renderEmail } from "@/integrations/email/templates";
 import { t, type Locale } from "@/i18n";
 import { handle, readJson } from "@/server/api";
 
@@ -21,13 +23,18 @@ export const POST = (req: Request, { params }: { params: Promise<{ orgId: string
       const url = `${c.rt.appUrl}/invite?token=${encodeURIComponent(inv.token)}`;
       let emailed = true;
       try {
-        await c.rt.email.send({
-          to: inv.email,
-          subject: t(locale, "email.invite.subject", { org: orgName, app: t(locale, "app.name") }),
-          text: t(locale, "email.invite.body", { inviter: c.user.name, org: orgName, url }),
+        const app = t(locale, "app.name");
+        const { html, text } = renderEmail({
+          locale,
+          heading: t(locale, "email.invite.heading", { org: orgName }),
+          intro: [t(locale, "email.invite.intro", { inviter: c.user.name, org: orgName, app })],
+          button: { label: t(locale, "email.invite.button"), url },
         });
+        await c.rt.email.send({ to: inv.email, subject: t(locale, "email.invite.subject", { org: orgName, app }), text, html });
       } catch {
         emailed = false;
+        // nothing reached the address, so its allowance is not spent: the invitation can be re-issued at once
+        await refundRateLimit(c.rt.db, inviteAddressKey(orgId, inv.email)).catch(() => undefined);
       }
       return { id: inv.id, email: inv.email, expiresAt: inv.expiresAt, emailed };
     },

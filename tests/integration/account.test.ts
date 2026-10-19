@@ -13,7 +13,7 @@ import { POST as inviteRoute } from "@/app/api/orgs/[orgId]/invitations/route";
 import { POST as approveRoute } from "@/app/api/orgs/[orgId]/members/[membershipId]/approve/route";
 import { GET as membersRoute } from "@/app/api/orgs/[orgId]/members/route";
 import { POST as acceptRoute } from "@/app/api/invitations/accept/route";
-import { addMember, connect, makeOrg, makeUser, systemRoleId } from "./helpers";
+import { addMember, connect, liftInviteAddressLimit, makeOrg, makeUser, systemRoleId } from "./helpers";
 import { linkIn, makeAuthApp, registerAndSignIn } from "./auth-helpers";
 
 const c = connect();
@@ -77,6 +77,9 @@ describe("invitations", () => {
     expect(mail.to).toBe(inviteeEmail);
     expect(mail.subject).toContain("InviteOrg");
     const token = new URL(linkIn(mail.text)).searchParams.get("token")!;
+    expect(mail.html.startsWith("<!doctype html>")).toBe(true); // every e-mail is HTML, with the plain text above as its twin
+    expect(mail.html).toContain(`href="http://localhost:3000/invite?token=${token}"`);
+    expect(mail.html).toContain("InviteOrg");
 
     // A different signed-in user cannot use the token
     const { client: other } = await registerAndSignIn(app, "intruder");
@@ -106,7 +109,7 @@ describe("invitations", () => {
     const role = await systemRoleId(c.admin, "viewer");
     const u = await makeUser(c.admin, "acceptor");
     await c.admin.update(users).set({ emailVerified: true, email: "acceptor@example.test" }).where(eq(users.id, u.id));
-    const mk = async (email: string) => withTenant(c.app, asAdmin.v, (s) => createInvitation(s, { email, roleId: role }));
+    const mk = async (email: string) => { await liftInviteAddressLimit(c.admin); return withTenant(c.app, asAdmin.v, (s) => createInvitation(s, { email, roleId: role })); };
 
     const expired = await mk("acceptor@example.test");
     await c.admin.update(invitations).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(invitations.id, expired.id));
@@ -147,6 +150,44 @@ describe("invitations", () => {
     const members = await withTenant(c.app, { userId: boss.id, orgId: r.orgId }, (s) => listMembers(s));
     expect(members).toHaveLength(1);
     expect(members[0]!.roles.map((x) => x.roleKey)).toEqual(["orgadmin"]);
+  });
+
+  it("e-mails are limited per address: a second invitation within a quarter of an hour is refused, another address is not, and the limit lifts", async () => {
+    const role = await systemRoleId(c.admin, "viewer");
+    await liftInviteAddressLimit(c.admin);
+    const invite = (email: string) => withTenant(c.app, asAdmin.v, (s) => createInvitation(s, { email, roleId: role }));
+    await invite("limited-one@example.test");
+    expect(await code(invite("Limited-One@example.test "))).toBe("RATE_LIMITED"); // written differently, still the same address
+    await invite("limited-two@example.test");
+    const rows = await c.admin.select().from(invitations).where(eq(invitations.email, "limited-one@example.test"));
+    expect(rows).toHaveLength(1); // the refused one left nothing behind
+    await liftInviteAddressLimit(c.admin); // stands in for the quarter of an hour passing
+    await invite("limited-one@example.test");
+  });
+});
+
+describe("invitation e-mail that could not be sent", () => {
+  it("does not use up the address's allowance: the invitation can be sent again at once, and only a delivered one starts the wait", async () => {
+    const O = await makeOrg(c.admin, "InviteRefundOrg");
+    const { client } = await registerAndSignIn(app, "refundadmin");
+    const [au] = await c.admin.select().from(users).where(eq(users.name, "refundadmin"));
+    await addMember(c.admin, O.org.id, au!.id, { role: "orgadmin" });
+    const role = await systemRoleId(c.admin, "viewer");
+    const email = `refund-${Date.now()}@example.test`;
+    const post = () => client.route(inviteRoute as never, "POST", `/api/orgs/${O.org.id}/invitations`, { email, roleId: role, locale: "en" }, { orgId: O.org.id });
+
+    const send = app.email.send;
+    app.email.send = async () => { throw new Error("provider down"); };
+    let first: Response;
+    try { first = await post(); } finally { app.email.send = send; }
+    expect(first.status).toBe(201);
+    expect((await first.json()) as { emailed: boolean }).toMatchObject({ emailed: false });
+
+    const second = await post(); // nothing reached the address, so it is not "within a quarter of an hour"
+    expect(second.status).toBe(201);
+    expect((await second.json()) as { emailed: boolean }).toMatchObject({ emailed: true });
+
+    expect((await post()).status).toBe(429); // delivered once: now the wait applies
   });
 });
 

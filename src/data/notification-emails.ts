@@ -45,6 +45,9 @@ export async function queueWaitingEmails(s: TenantSession, now = new Date()): Pr
     const res = await enqueue(s.tx, { kind: "notification.email", orgId: s.orgId, payload: { notificationId: r.id }, dedupeKey: `email:${r.id}`, maxAttempts: 8, runAt: now });
     if (res.created) queued++;
   }
+  // The day's deadline e-mails (handlers/deadline.ts) as well: what automatic mode would send, for this organization only, still at most one a
+  // person a day. A press within the same minute queues nothing new.
+  await enqueue(s.tx, { kind: "deadline.email", orgId: s.orgId, payload: { manual: true }, dedupeKey: `deadline-manual:${s.orgId}:${Math.floor(now.getTime() / 60_000)}`, maxAttempts: 3, runAt: now });
   await s.tx.insert(auditLogs).values({ orgId: s.orgId, actorUserId: s.userId, action: "notification.send_waiting_emails", targetType: "organization", targetId: s.orgId, metadata: { queued } });
   return { queued, more: rows.length > SEND_BATCH };
 }

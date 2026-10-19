@@ -5,7 +5,7 @@ This report separates what was **verified** (command and result given), what was
 
 ## 1. Verdict
 
-* **As software, locally:** the application builds, passes every automated check that exists (822 unit/integration tests, 101 browser tests, static analysis, dependency audit for shipped code, a restore drill, a local load test, database and smoke verifications), and the final passes found and fixed the defects listed in §5.
+* **As software, locally:** the application builds, passes every automated check that exists (877 unit/integration tests, 101 browser tests, static analysis, dependency audit for shipped code, a restore drill, a local load test, database and smoke verifications), and the final passes found and fixed the defects listed in §5.
 * **As a service you can launch today: no.** It has **never run on Vercel, Neon, Resend, Google, Discord or Vercel Blob**, and no restore has been tested on a real Neon plan. Those are explicit **go-live blockers** (§4). Everything else is in good shape to hand over, with the limitations listed in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 
 ## 2. Commands run and their results
@@ -16,8 +16,8 @@ All against PostgreSQL 16.15 on a local cluster, Node 22.22, pnpm 10.28, Chromiu
 |---|---|
 | `pnpm lint` | clean (no errors, no warnings) |
 | `pnpm typecheck` | clean |
-| `pnpm test:unit` | **288 / 288 passed** |
-| `TEST_DATABASE_URL=… pnpm test:integration` | **534 / 534 passed** |
+| `pnpm test:unit` | **303 / 303 passed** |
+| `TEST_DATABASE_URL=… pnpm test:integration` | **574 / 574 passed** |
 | `pnpm build` | compiled successfully (all pages, 69 API routes, proxy, instrumentation) |
 | `pnpm exec playwright test tests/e2e` (fresh database, Chromium) | **101 / 101 passed** (12 spec files, ≈ 4.8 min), run with the defaults: automatic e-mail off, no cron calling the app except where a test calls it |
 | `pnpm audit --prod` | **No known vulnerabilities** |
@@ -26,9 +26,9 @@ All against PostgreSQL 16.15 on a local cluster, Node 22.22, pnpm 10.28, Chromiu
 | `pnpm verify:database` (runtime role, E2E database) | **15 / 15** (also correctly *fails* for a superuser connection, and for a runtime role whose grants were not re-applied after migration 0014 or 0015: 14/15) |
 | `pnpm smoke` (local production server) | **17 / 17** (measured before the registration switch was added; the script is unchanged and was not re-run since) |
 | `scripts/backup.sh` with encryption | dump → AES-256 → checksum → decrypt → `pg_restore --list` verified; wrong passphrase rejected; refuses a role without `BYPASSRLS` (exit 3) |
-| Mutation checks (see [TESTING.md](TESTING.md)) | 42 deliberate breakages (6 on the original code, 36 on the extras), each caught by a test. Two of them were **not** caught at first (a work budget and a signal fingerprint) and the tests were made discriminating |
+| Mutation checks (see [TESTING.md](TESTING.md)) | 56 deliberate breakages (6 on the original code, 50 on the extras), each caught by a test. Two of them were **not** caught at first (a work budget and a signal fingerprint) and the tests were made discriminating |
 
-Test inventory: 288 unit + 534 integration + 101 end-to-end = **923 automated tests**. Source ≈ 13 400 lines, tests ≈ 10 000 lines (TypeScript, excluding scripts).
+Test inventory: 303 unit + 574 integration + 101 end-to-end = **978 automated tests**. Source ≈ 13 400 lines, tests ≈ 10 000 lines (TypeScript, excluding scripts).
 
 Also run: `pnpm load` (60 000 tasks, 10 and 50 concurrent users, 0 errors; [TESTING.md](TESTING.md#load-test-pnpm-load)), the error-reporting delivery check against a local HTTPS stand-in for the tracker, and by-hand runs of `pnpm org` (export → `--replace` round trip on the E2E data: identical), `pnpm backup:attachments` and `pnpm privacy` against the E2E database with the least-privilege role.
 
@@ -48,13 +48,13 @@ Legend: ✅ verified here · ⚠️ verified only against fakes / locally, real 
 | Secure attachment access | ✅ filesystem store, ⚠️ Blob | Content sniffing, private download route, headers, byte-exact round trip, cap race fixed. **4 MB through the server; up to 25 MB by direct browser → Blob upload** (token bound to one object name/size/type, server-side inspection of the stored object: 14 tests, 5 deliberate breakages caught). The Vercel Blob client and the browser → Blob request are **type-checked / read from SDK source only, never run**; `DIRECT_UPLOADS=off` is the kill switch. |
 | Audit retention and deletion behaviour | ✅ | 90-day floor enforced **in the database**; 30-day trash; purge job tested end to end; append-only proven for the runtime role. |
 | Backup and a successful restore test | ⚠️ | **Local drill passed (above).** Neon’s own backups / point-in-time restore: unverified. Blob content: `pnpm backup:attachments` (hash-verified, incremental; tested with two filesystem stores, **not** with Blob). One organization can be exported/imported (`pnpm org`, tested across two real databases, never on Neon). A scheduled backup job is not in the repository. |
-| Test suite, type check, lint, production build, deployment configuration | ✅ locally, ⚠️ deployment | `vercel.json` (cron once a day, so it fits Vercel Hobby) and `vercel.pro.json` (every minute) never deployed; plan limits are from memory and could not be checked against Vercel's site from the build machine. |
+| Test suite, type check, lint, production build, deployment configuration | ✅ locally, ⚠️ deployment | `vercel.json` (cron once a day at 23:00 Thai time, so it fits Vercel Hobby) and `vercel.pro.json` (every minute) never deployed; plan limits are from memory and could not be checked against Vercel's site from the build machine. |
 | Operational documentation and known limitations | ✅ | 16 documents; derived parts (permission matrix, ERD) are generated and guarded by tests. |
 
 ## 4. Go-live blockers (clear all before real users)
 
 1. **Deploy to a real Vercel project with a real Neon database**, run `pnpm verify:database`, `pnpm smoke`, and the manual checklist in [DEPLOYMENT.md](DEPLOYMENT.md) §8. Until then the integrations are untested in the only environment that matters.
-2. **Choose the e-mail mode for your plan.** The default (automatic e-mail switched off) runs on Vercel Hobby: in-app notifications work when people use the app, and an administrator sends the waiting e-mails. For automatic e-mails an administrator switches them on in Settings → Notifications, and something has to run the background work regularly: your own server's per-minute cron, a plan that runs Vercel's cron every minute (`vercel.pro.json`), or an external scheduler. Confirm the plan's real limits yourself.
+2. **Choose the e-mail mode for your plan.** The default (automatic e-mail switched off) runs on Vercel Hobby: in-app notifications work when people use the app, and an administrator sends the waiting e-mails. For automatic e-mails an administrator switches them on in Settings → Notifications, and something has to run the background work regularly: your own server's per-minute cron, a plan that runs Vercel's cron every minute (`vercel.pro.json`), or an external scheduler. Confirm the plan's real limits yourself. Open the deadline e-mail and a reset e-mail in a real mailbox (HTML, working buttons, not in spam), and request two password resets in a row to see the two-hour limit on the real database.
 3. **Backups on your actual Neon plan:** record the restore window, create a **dedicated `BYPASSRLS` backup role** (a plain owner cannot `pg_dump` this schema), schedule `scripts/backup.sh` somewhere that has `pg_dump`, and **perform a restore into a scratch database** ([BACKUP_RESTORE.md](BACKUP_RESTORE.md) §5). Decide where the attachment-file backup lives and run `pnpm backup:attachments` once (a second Blob store or a directory; the Blob implementation has never run).
 4. **Verify Resend end to end** (domain verified, a real message delivered), and Google/Discord if you intend to use them.
 5. **Secrets hygiene:** `APP_ENCRYPTION_KEY` and `BETTER_AUTH_SECRET` stored outside Vercel as well; preview deployments isolated from production data.

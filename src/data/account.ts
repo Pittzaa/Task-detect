@@ -12,6 +12,9 @@ import { soleOrganization } from "@/server/registration";
 import type { TenantSession } from "./tenant";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const INVITE_RESEND_SECONDS = 15 * 60;
+/** The allowance of one address in one organization (see createInvitation); the route gives it back when the e-mail could not be sent. */
+export const inviteAddressKey = (orgId: string, email: string) => `invite:addr:${orgId}:${sha256Hex(email.trim().toLowerCase())}`;
 
 export async function setCtx(tx: Tx, ctx: { userId: string; orgId?: string | null; orgSlug?: string; inviteTokenHash?: string }) {
   await tx.execute(sql`select
@@ -111,6 +114,8 @@ export async function createInvitation(s: TenantSession, input: { email: string;
   s.require("org.manage_members");
   const email = input.email.trim().toLowerCase();
   await consumeRateLimit(s.tx as unknown as Db, `invite:${s.orgId}`, 3600, 50);
+  // an invitation is an e-mail to someone outside: not again to the same address within a quarter of an hour (a lost mail can be re-sent after that)
+  await consumeRateLimit(s.tx as unknown as Db, inviteAddressKey(s.orgId, email), INVITE_RESEND_SECONDS, 1);
   await assertCanGrantRole(s, input.roleId, { type: "organization" });
   const token = randomToken();
   const expiresAt = new Date(Date.now() + INVITE_TTL_MS);

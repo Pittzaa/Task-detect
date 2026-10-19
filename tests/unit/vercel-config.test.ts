@@ -17,6 +17,13 @@ describe("Vercel cron configuration", () => {
     expect(crons.map((c) => c.path)).toContain("/api/cron/tick");
   });
 
+  it("the daily run is at 23:00 Thai time (Vercel reads the schedule in UTC)", () => {
+    const tick = read("vercel.json").crons.find((c) => c.path === "/api/cron/tick")!;
+    const [minute, hour] = tick.schedule.split(/\s+/).map(Number) as [number, number];
+    const local = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(Date.UTC(2026, 0, 15, hour, minute)));
+    expect(local).toBe("23:00");
+  });
+
   it("vercel.pro.json is the every-minute version for a paid plan, same endpoint", () => {
     const { crons } = read("vercel.pro.json");
     expect(crons).toEqual([{ path: "/api/cron/tick", schedule: "* * * * *" }]);

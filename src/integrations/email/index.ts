@@ -4,14 +4,17 @@ import { logger } from "@/lib/logger";
 export interface EmailMessage {
   to: string;
   subject: string;
+  /** Plain-text twin of `html`, for clients and filters that cannot show HTML. */
   text: string;
-  html?: string;
+  /** Every message is HTML (see templates.ts). */
+  html: string;
   /** Sent as an Idempotency-Key so a retried job cannot deliver twice. */
   idempotencyKey?: string;
 }
 
 export class EmailError extends Error {
-  constructor(message: string, readonly retryable: boolean) {
+  /** `status`: the provider's HTTP status when there was one. 400 and 422 refer to this message's address; 401 and 403 to our account with the provider. */
+  constructor(message: string, readonly retryable: boolean, readonly status?: number) {
     super(message);
     this.name = "EmailError";
   }
@@ -39,7 +42,7 @@ export function createResendSender(opts: { apiKey: string; from: string; endpoin
             "Content-Type": "application/json",
             ...(m.idempotencyKey ? { "Idempotency-Key": m.idempotencyKey } : {}),
           },
-          body: JSON.stringify({ from: opts.from, to: [m.to], subject: m.subject, text: m.text, ...(m.html ? { html: m.html } : {}) }),
+          body: JSON.stringify({ from: opts.from, to: [m.to], subject: m.subject, text: m.text, html: m.html }),
           signal: AbortSignal.timeout(10_000),
         });
       } catch {
@@ -47,7 +50,7 @@ export function createResendSender(opts: { apiKey: string; from: string; endpoin
       }
       if (!res.ok) {
         // Do not include the response body: it may echo recipient data.
-        throw new EmailError(`email provider responded ${res.status}`, res.status === 429 || res.status >= 500);
+        throw new EmailError(`email provider responded ${res.status}`, res.status === 429 || res.status >= 500, res.status);
       }
     },
   };
@@ -68,6 +71,8 @@ export function createCaptureSender() {
   const sender: EmailSender & { sent: EmailMessage[]; failNext?: EmailError } = {
     sent,
     async send(m) {
+      // every message must be HTML with a text twin: a caller that forgets is caught by whichever test sends it
+      if (!/^<!doctype html>/i.test(m.html ?? "") || !m.text) throw new Error("e-mail without an HTML body and a text body");
       if (sender.failNext) {
         const err = sender.failNext;
         sender.failNext = undefined;
@@ -83,7 +88,7 @@ export function createCaptureSender() {
 export function createFileSender(path: string): EmailSender {
   return {
     async send(m) {
-      await appendFile(path, JSON.stringify({ to: m.to, subject: m.subject, text: m.text, at: new Date().toISOString() }) + "\n");
+      await appendFile(path, JSON.stringify({ to: m.to, subject: m.subject, text: m.text, html: m.html, at: new Date().toISOString() }) + "\n");
     },
   };
 }

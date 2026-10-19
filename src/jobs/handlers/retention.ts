@@ -170,7 +170,7 @@ export async function purgeOrganization(ctx: Parameters<JobHandler>[0], orgId: s
 
 export const retentionPurge: JobHandler = async (ctx) => {
   const now = ctx.now();
-  const deadline = Date.now() + BUDGET_MS;
+  const deadline = Math.min(Date.now() + BUDGET_MS, ctx.deadline ?? Infinity); // never past the run that started it (a cron invocation has a time limit)
   const report = emptyReport();
   await purgeGlobal(ctx.db, now, report);
   const orgs = await withWorker(ctx.db, (tx) => tx.select({ id: organizations.id }).from(organizations));

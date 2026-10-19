@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { createDb, type Db } from "../../src/db/client";
 import {
   departments, memberships, organizations, projects, roleAssignments, roles, teams, users,
@@ -29,6 +29,11 @@ export async function makeOrg(admin: Db, name = "Org", o: { autoEmail?: boolean 
   const [team] = await admin.insert(teams).values({ orgId: org!.id, departmentId: dept!.id, name: `${name} Team` }).returning();
   const [project] = await admin.insert(projects).values({ orgId: org!.id, name: `${name} Project` }).returning();
   return { org: org!, dept: dept!, team: team!, project: project! };
+}
+
+/** Invitations are limited to one a quarter of an hour per address; tests that invite one address repeatedly lift that between invitations. */
+export async function liftInviteAddressLimit(admin: Db) {
+  await admin.execute(sql`delete from app_rate_limits where key like 'invite:addr:%'`);
 }
 
 export async function makeUser(admin: Db, label = "u") {
