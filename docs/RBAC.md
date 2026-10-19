@@ -22,6 +22,8 @@
 * `team.manage` — create and delete teams. Checked against the team’s department, so an administrator scoped to a department can delete the teams in it; one scoped to a single team cannot delete that team.
 * `project.delete` — delete a project and its tasks (checked against the project’s scope).
 
+**Upgrade note:** `department.manage`, `team.manage` and `project.delete` used to allow only creating departments and teams (`project.delete` nothing). They now also authorize deleting, which needs the typed name of the thing as well (the server refuses a request without it). A custom role that already holds them can therefore delete structure after the upgrade; review such roles.
+
 Safeguards in the services: no privilege escalation (`assertCanGrantRole`: you can only grant roles whose permissions you hold at that scope), last-administrator protection (advisory lock), no self-suspension, custom roles may only contain catalog permissions, and **unreadable resources return 404 rather than 403** so existence is not disclosed.
 What the UI shows is a *hint* (`/api/orgs/:id/context` returns capability flags; `createTask`/`manageSeries` mean “somewhere in the org”); the server decides every action.
 

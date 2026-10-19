@@ -33,7 +33,7 @@ function canSee(s: TenantSession, v: Pick<ViewRow, "scope" | "teamId" | "ownerId
 }
 
 async function assertTeam(s: TenantSession, teamId: string) {
-  const [t] = await s.tx.select({ id: teams.id }).from(teams).where(and(eq(teams.orgId, s.orgId), eq(teams.id, teamId), isNull(teams.deletedAt)));
+  const [t] = await s.tx.select({ id: teams.id }).from(teams).where(and(eq(teams.orgId, s.orgId), eq(teams.id, teamId), isNull(teams.deletedAt))).for("share");
   if (!t) throw notFound();
 }
 

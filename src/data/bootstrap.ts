@@ -21,7 +21,10 @@ export async function bootstrapOrganization(db: Db, input: { name: string; slug:
     // Worker context lets a plain (non-BYPASSRLS) owner create the organization; the org context set right after
     // satisfies the tenant policies of the invitation and audit rows.
     await tx.execute(sql`select set_config('app.worker', 'on', true), set_config('app.user_id', '', true), set_config('app.org_id', '', true)`);
+    // One bootstrap at a time: without this, two runs with different codes can both see "no organization yet" and both create one.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('task-tracker:bootstrap'))`);
     let [org] = await tx.select().from(organizations).where(eq(organizations.slug, input.slug));
+    if (org?.deletedAt) throw new Error(`The code "${input.slug}" belongs to an organization that was deleted. Choose another code (or have an operator restore that organization) instead of inviting someone into it.`);
     if (!org) {
       const others = await tx.select({ slug: organizations.slug }).from(organizations).where(isNull(organizations.deletedAt)).limit(1);
       if (others[0] && !input.allowAdditional) {

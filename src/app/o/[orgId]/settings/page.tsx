@@ -3,7 +3,7 @@ import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { DISCORD_EVENTS, NOTIFICATION_TYPES } from "@/domain/notifications";
 import { api } from "@/ui/api";
-import { Btn, Empty, ErrorNote, Field, Loading, Notice, TableWrap, Tabs, useToast } from "@/ui/components";
+import { Btn, Empty, ErrorNote, Field, Loading, Notice, TableWrap, Tabs, useToast, useTypedConfirm } from "@/ui/components";
 import { useQuery } from "@/ui/hooks";
 import { useI18n } from "@/ui/i18n";
 import { useOrg } from "@/ui/org";
@@ -42,16 +42,18 @@ function GeneralSettings() {
   const { t, err } = useI18n();
   const toast = useToast();
   const q = useQuery<{ registrationOpen: boolean }>(`org-settings:${orgId}`, () => api(`/api/orgs/${orgId}/settings`));
-  // the switch answers at once: the chosen value is shown for as long as the server still reports the value it had before
-  const [chosen, setChosen] = useState<{ value: boolean; baseline: boolean }>();
+  // the switch answers at once: the chosen value is shown until a newer answer from the server has been read (any new result, so a
+  // change made meanwhile by another administrator shows too); a failed request drops it straight away
+  const [chosen, setChosen] = useState<{ value: boolean; shownWith: object }>();
   async function setOpen(open: boolean) {
-    setChosen({ value: open, baseline: q.data!.registrationOpen });
+    if (!q.data) return;
+    setChosen({ value: open, shownWith: q.data });
     try { await api(`/api/orgs/${orgId}/settings`, { method: "PUT", body: { registrationOpen: open } }); q.reload(); toast(t("ui.save")); }
     catch (e) { setChosen(undefined); toast(err(e), "error"); }
   }
   if (q.loading && !q.data) return <Loading />;
   if (q.error) return <ErrorNote error={q.error} onRetry={q.reload} />;
-  const open = chosen && q.data!.registrationOpen === chosen.baseline ? chosen.value : q.data!.registrationOpen;
+  const open = chosen && q.data === chosen.shownWith ? chosen.value : q.data!.registrationOpen;
   return (
     <section className="card stack" aria-labelledby="h-registration">
       <h2 id="h-registration">{t("ui.registration_title")}</h2>
@@ -112,6 +114,7 @@ function Integrations() {
   const { orgId, can } = useOrg();
   const { t, err, instant } = useI18n();
   const toast = useToast();
+  const confirmDelete = useTypedConfirm();
   const cal = useQuery<Cal>(`cal:${orgId}`, () => api(`/api/orgs/${orgId}/calendar`), { refreshMs: 60_000 });
   const dests = useQuery<{ destinations: Dest[] }>(can.manageIntegrations ? `dests:${orgId}` : null, () => api(`/api/orgs/${orgId}/integrations/discord`));
   const health = useQuery<{ kinds: { kind: string; pending: number; dead: number; lastError: string | null }[] }>(can.manageIntegrations ? `health:${orgId}` : null, () => api(`/api/orgs/${orgId}/integrations/health`), { refreshMs: 60_000 });
@@ -160,10 +163,11 @@ function Integrations() {
               <span className="row">
                 <Btn small onClick={async () => { await api(`/api/orgs/${orgId}/integrations/discord/${d.id}`, { method: "PATCH", body: { enabled: !d.enabled } }).catch((e) => toast(err(e), "error")); dests.reload(); }}>{d.enabled ? t("ui.disable") : t("ui.enable")}</Btn>
                 <RotateButton orgId={orgId} id={d.id} onDone={dests.reload} />
-                <Btn small kind="danger" onClick={async () => { if (!window.confirm(t("ui.confirm_irreversible"))) return; await api(`/api/orgs/${orgId}/integrations/discord/${d.id}`, { method: "DELETE" }).catch((e) => toast(err(e), "error")); dests.reload(); }}>{t("ui.delete")}</Btn>
+                <Btn small kind="danger" aria-label={`${t("ui.delete")}: ${d.name}`} onClick={() => confirmDelete.ask({ phrase: d.name, body: t("ui.confirm_irreversible"), run: async () => { await api(`/api/orgs/${orgId}/integrations/discord/${d.id}`, { method: "DELETE" }); dests.reload(); } })}>{t("ui.delete")}</Btn>
               </span>
             </div>
           ))}
+          {confirmDelete.dialog}
           <form onSubmit={addDest} style={{ marginTop: "1rem" }}>
             <div className="grid cols-2">
               <Field label={t("ui.name")}>{(id) => <input id={id} required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />}</Field>
@@ -219,6 +223,7 @@ function CustomFieldsAdmin() {
   const { orgId } = useOrg();
   const { t, err } = useI18n();
   const toast = useToast();
+  const confirmDelete = useTypedConfirm();
   const q = useQuery<{ fields: FieldDef[] }>(`cf:${orgId}`, () => api(`/api/orgs/${orgId}/custom-fields`));
   const [f, setF] = useState({ name: "", type: "text", options: "", min: "", max: "", def: "" });
   async function create(e: React.FormEvent) {
@@ -235,9 +240,10 @@ function CustomFieldsAdmin() {
       <TableWrap label={t("ui.custom_fields")}><table><tbody>
         {q.data?.fields.map((d) => (
           <tr key={d.id}><td><strong>{d.name}</strong></td><td>{t(`ui.type_${d.type}` as never)}</td><td className="small muted">{d.options.filter((o) => !o.archived).map((o) => o.label).join(", ")}</td>
-            <td><Btn small kind="danger" onClick={async () => { if (!window.confirm(t("ui.confirm_irreversible"))) return; await api(`/api/orgs/${orgId}/custom-fields/${d.id}`, { method: "DELETE" }).catch((e) => toast(err(e), "error")); q.reload(); }}>{t("ui.archive")}</Btn></td></tr>
+            <td><Btn small kind="danger" aria-label={`${t("ui.archive")}: ${d.name}`} onClick={() => confirmDelete.ask({ phrase: d.name, title: t("ui.confirm_archive_title"), confirmLabel: t("ui.archive"), body: t("ui.confirm_archive_field"), run: async () => { await api(`/api/orgs/${orgId}/custom-fields/${d.id}`, { method: "DELETE" }); q.reload(); } })}>{t("ui.archive")}</Btn></td></tr>
         ))}
       </tbody></table></TableWrap>
+      {confirmDelete.dialog}
       <form className="card" onSubmit={create}>
         <h2>{t("ui.new_field")}</h2>
         <div className="grid cols-2">

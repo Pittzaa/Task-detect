@@ -118,7 +118,10 @@ async function main() {
     const app = await connect(SCRATCH, APP_ROLE, "app");
     try {
       const orgs = (await src.query(`select o.id, (select count(*)::int from tasks t where t.org_id = o.id) as tasks from organizations o order by o.created_at`)).rows as { id: string; tasks: number }[];
-      check("the restored database has at least two tenants to test isolation with", orgs.length >= 2, `${orgs.length} organizations`);
+      check("the restored database has an organization to test with", orgs.length >= 1, `${orgs.length} organizations`);
+      // An installation is one organization, so a real one has nothing to be separated from: the cross-tenant half of the check needs two.
+      check("tenants to test isolation between (a one-organization installation passes with a note: only the no-context and per-tenant checks apply)", true, orgs.length >= 2 ? `${orgs.length} organizations` : `only ${orgs.length} organization: cross-tenant check not applicable`);
+      if (orgs.length < 1) throw new Error("nothing to test: the source has no organization");
       const visible = async (orgId: string | null) => {
         await app.query("begin");
         try {
@@ -139,6 +142,12 @@ async function main() {
       try { await app.query(`delete from audit_logs`); } catch { denied = true; }
       await app.query("rollback");
       check("audit logs are still append-only for the runtime role after restore", denied);
+      // the one column the runtime role may change on an organization: still granted on the restored copy, and only for its own row
+      await app.query("begin");
+      await app.query(`select set_config('app.org_id', $1, true)`, [orgs[0]!.id]);
+      const sw = await app.query(`update organizations set registration_open = registration_open where id = $1`, [orgs[0]!.id]).then((r) => r.rowCount === 1, () => false);
+      await app.query("rollback");
+      check("the runtime role can still use the registration switch of its own organization after restore", sw);
       const fn = await app.query(`select purge_audit_logs(90) is not null as ok`);
       check("retention function is present and callable by the runtime role after restore", fn.rows[0].ok === true);
     } finally { await app.end(); }

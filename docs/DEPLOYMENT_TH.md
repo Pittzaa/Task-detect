@@ -294,10 +294,10 @@ DATABASE_URL='<DATABASE_URL ของ tt_app>' BLOB_READ_WRITE_TOKEN='<token>' p
 ## การปล่อยเวอร์ชันถัดไป
 
 1. อ่านว่าเวอร์ชันใหม่มี migration หรือไม่ (โฟลเดอร์ `drizzle/` ใหม่; ดู [MIGRATIONS.md](MIGRATIONS.md))
-2. ถ้ามี: `pnpm db:migrate` (owner) → รัน `grants.sql` ซ้ำ → **แล้วจึง** deploy migration เป็นแบบเพิ่มอย่างเดียวและเข้ากับเวอร์ชันก่อนหน้าได้ แอปเก่าจึงทำงานต่อได้ระหว่างสลับ และ `/api/health/ready` จะรายงานถ้า build ใหม่กว่าฐานข้อมูล
+2. ถ้ามี: `pnpm db:migrate` (owner) → รัน `grants.sql` ซ้ำ → รัน `pnpm verify:database` → **แล้วจึง** deploy migration เป็นแบบเพิ่มอย่างเดียวและเข้ากับเวอร์ชันก่อนหน้าได้ แอปเก่าจึงทำงานต่อได้ระหว่างสลับ และ `/api/health/ready` จะรายงานถ้า build ใหม่กว่าฐานข้อมูล
 3. deploy → รัน `pnpm smoke` อีกครั้ง
 
-**Rollback**: ใน Vercel ให้ promote deployment ก่อนหน้า (ทันที) migration เป็นแบบไปข้างหน้าอย่างเดียว ถ้า migration มีปัญหาให้เขียน migration ใหม่แก้ ถ้าเสียหายหนักให้ restore จาก backup ([BACKUP_RESTORE.md](BACKUP_RESTORE.md)) หมุนกุญแจเข้ารหัส: ใช้ `APP_ENCRYPTION_KEY_PREVIOUS` กับ `pnpm rotate:key` ([SECURITY.md](SECURITY.md))
+**Rollback**: ใน Vercel ให้ promote deployment ก่อนหน้า (ทันที) **ข้อควรระวัง: build ที่เก่ากว่า migration 0014 ไม่รู้จักสวิตช์เปิด/ปิดสมัครสมาชิก จึงเปิดรับสมัครให้ทุกคนจนกว่าจะอัปเดตกลับ** (ตรวจที่ ตั้งค่า → ทั่วไป หลังย้อน) migration เป็นแบบไปข้างหน้าอย่างเดียว ถ้า migration มีปัญหาให้เขียน migration ใหม่แก้ ถ้าเสียหายหนักให้ restore จาก backup ([BACKUP_RESTORE.md](BACKUP_RESTORE.md)) หมุนกุญแจเข้ารหัส: ใช้ `APP_ENCRYPTION_KEY_PREVIOUS` กับ `pnpm rotate:key` ([SECURITY.md](SECURITY.md))
 
 ## แก้ปัญหาที่พบบ่อย
 

@@ -2,6 +2,8 @@ import { z } from "zod";
 import { TASK_PRIORITIES, TASK_STATUSES, isValidDateOnly } from "@/domain/workflow";
 
 export const uuid = z.string().uuid();
+/** The body of a request that deletes something that matters: its name, as typed by the person (see src/lib/confirm.ts). */
+export const confirmBody = z.object({ confirm: z.string().max(300) }).strict();
 export const dateOnly = z.string().refine(isValidDateOnly, "Expected a calendar date YYYY-MM-DD");
 export const status = z.enum(TASK_STATUSES);
 export const priority = z.enum(TASK_PRIORITIES);

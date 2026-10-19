@@ -5,7 +5,7 @@ This report separates what was **verified** (command and result given), what was
 
 ## 1. Verdict
 
-* **As software, locally:** the application builds, passes every automated check that exists (779 unit/integration tests, 92 browser tests, static analysis, dependency audit for shipped code, a restore drill, a local load test, database and smoke verifications), and the final passes found and fixed the defects listed in §5.
+* **As software, locally:** the application builds, passes every automated check that exists (800 unit/integration tests, 97 browser tests, static analysis, dependency audit for shipped code, a restore drill, a local load test, database and smoke verifications), and the final passes found and fixed the defects listed in §5.
 * **As a service you can launch today: no.** It has **never run on Vercel, Neon, Resend, Google, Discord or Vercel Blob**, and no restore has been tested on a real Neon plan. Those are explicit **go-live blockers** (§4). Everything else is in good shape to hand over, with the limitations listed in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 
 ## 2. Commands run and their results
@@ -16,19 +16,19 @@ All against PostgreSQL 16.15 on a local cluster, Node 22.22, pnpm 10.28, Chromiu
 |---|---|
 | `pnpm lint` | clean (no errors, no warnings) |
 | `pnpm typecheck` | clean |
-| `pnpm test:unit` | **279 / 279 passed** |
-| `TEST_DATABASE_URL=… pnpm test:integration` | **500 / 500 passed** |
+| `pnpm test:unit` | **286 / 286 passed** |
+| `TEST_DATABASE_URL=… pnpm test:integration` | **514 / 514 passed** |
 | `pnpm build` | compiled successfully (all pages, 68 API routes, proxy, instrumentation) |
-| `pnpm exec playwright test tests/e2e` (fresh database, Chromium) | **92 / 92 passed** (11 spec files, ≈ 4.5 min) |
+| `pnpm exec playwright test tests/e2e` (fresh database, Chromium) | **97 / 97 passed** (11 spec files, ≈ 4.3 min) |
 | `pnpm audit --prod` | **No known vulnerabilities** |
 | `pnpm audit` (incl. dev tools) | 1 high: `braces` ≤ 3.0.3 via ESLint tooling, dev-only, no patched version listed — **accepted**, see [SECURITY.md](SECURITY.md) §3 |
-| `pnpm backup:restore-test` | **20 / 20**: dump 183 744 bytes → restore → 9 structure comparisons identical, **43 tables / 613 rows with identical content checksums** (re-run on the final state, 15 migrations), each tenant sees only its own rows through the restored least-privilege role, audit log still append-only |
+| `pnpm backup:restore-test` | **22 / 22**: dump 183 744 bytes → restore → 9 structure comparisons identical, **43 tables / 613 rows with identical content checksums** (re-run on the final state, 15 migrations), each tenant sees only its own rows through the restored least-privilege role, audit log still append-only |
 | `pnpm verify:database` (runtime role, E2E database) | **15 / 15** (also correctly *fails* for a superuser connection, and for a runtime role whose grants were not re-applied after migration 0014) |
 | `pnpm smoke` (local production server) | **17 / 17** (measured before the registration switch was added; the script is unchanged and was not re-run since) |
 | `scripts/backup.sh` with encryption | dump → AES-256 → checksum → decrypt → `pg_restore --list` verified; wrong passphrase rejected; refuses a role without `BYPASSRLS` (exit 3) |
 | Mutation checks (see [TESTING.md](TESTING.md)) | 32 deliberate breakages (6 on the original code, 26 on the extras), each caught by a test. Two of them were **not** caught at first (a work budget and a signal fingerprint) and the tests were made discriminating |
 
-Test inventory: 279 unit + 500 integration + 92 end-to-end = **871 automated tests**. Source ≈ 13 400 lines, tests ≈ 10 000 lines (TypeScript, excluding scripts).
+Test inventory: 286 unit + 514 integration + 97 end-to-end = **897 automated tests**. Source ≈ 13 400 lines, tests ≈ 10 000 lines (TypeScript, excluding scripts).
 
 Also run: `pnpm load` (60 000 tasks, 10 and 50 concurrent users, 0 errors; [TESTING.md](TESTING.md#load-test-pnpm-load)), the error-reporting delivery check against a local HTTPS stand-in for the tracker, and by-hand runs of `pnpm org` (export → `--replace` round trip on the E2E data: identical), `pnpm backup:attachments` and `pnpm privacy` against the E2E database with the least-privilege role.
 
@@ -81,7 +81,7 @@ Details and evidence: [SECURITY.md](SECURITY.md) §4, [TESTING.md](TESTING.md).
 * **Security hardening:** nonce-based CSP, security headers, NUL-byte rejection, production cookie verification.
 * **Product gaps closed:** recurring-tasks screen, backup-code sign-in, confirmations, accessibility fixes.
 * **Documentation:** the full set required by the brief, with generated parts guarded by tests.
-* **Migrations:** `0010` indexes, `0011` retention controls, `0012` owner bootstrap policies, `0013` the `tasks (org_id, updated_at)` index (14 in total).
+* **Migrations:** `0010` indexes, `0011` retention controls, `0012` owner bootstrap policies, `0013` the `tasks (org_id, updated_at)` index (15 in total, with `0014` the registration switch).
 
 ## 6b. Optional extras added after the first pass (each with tests and a deliberate-breakage check)
 

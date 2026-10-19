@@ -3,11 +3,17 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { AppError } from "@/lib/errors";
 import { withTenant } from "@/data/tenant";
 import { createDepartment, createProject, createTeam, deleteDepartment, deleteProject, deleteTeam, getProject, listDepartments, listProjects, listTeams, setProjectTeams } from "@/data/structure";
-import { listTasks } from "@/data/tasks";
+import { createTask, listTasks } from "@/data/tasks";
+import { assignRole } from "@/data/account";
+import { createDestination } from "@/data/integrations";
 import {
-  auditLogs, departments, integrationDestinations, outboxEvents, projectTeams, projects, recurrenceSeries, roleAssignments, savedViews, tasks, teams,
+  auditLogs, departments, integrationDestinations, memberships, outboxEvents, projectTeams, projects, recurrenceSeries, roleAssignments, savedViews, tasks, teams, users,
 } from "@/db/schema";
-import { addMember, connect, makeOrg, makeUser } from "./helpers";
+import * as deptRoute from "@/app/api/orgs/[orgId]/departments/[departmentId]/route";
+import * as teamRoute from "@/app/api/orgs/[orgId]/teams/[teamId]/route";
+import * as projectRoute from "@/app/api/orgs/[orgId]/projects/[projectId]/route";
+import { addMember, connect, makeOrg, makeUser, systemRoleId } from "./helpers";
+import { makeAuthApp, registerAndSignIn } from "./auth-helpers";
 
 const c = connect();
 afterAll(() => c.close());
@@ -20,6 +26,18 @@ async function code(p: Promise<unknown>) {
     return e instanceof AppError ? e.code : `RAW:${(e as Error).message}`;
   }
 }
+
+/** Deleting needs the thing's name typed; unless a test is about that, it types the right one. */
+const nameOf = async (kind: "d" | "t" | "p", id: string) => {
+  const rows = kind === "d" ? await c.admin.select({ n: departments.name }).from(departments).where(eq(departments.id, id))
+    : kind === "t" ? await c.admin.select({ n: teams.name }).from(teams).where(eq(teams.id, id))
+    : await c.admin.select({ n: projects.name }).from(projects).where(eq(projects.id, id));
+  return rows[0]?.n ?? "(no such thing)";
+};
+type Ctx = { userId: string; orgId: string };
+const delDept = (ctx: Ctx, id: string, typed?: string) => withTenant(c.app, ctx, async (s) => deleteDepartment(s, id, typed ?? (await nameOf("d", id))));
+const delTeam = (ctx: Ctx, id: string, typed?: string) => withTenant(c.app, ctx, async (s) => deleteTeam(s, id, typed ?? (await nameOf("t", id))));
+const delProject = (ctx: Ctx, id: string, typed?: string) => withTenant(c.app, ctx, async (s) => deleteProject(s, id, typed ?? (await nameOf("p", id))));
 
 describe("deleting departments, teams and projects", () => {
   let O: Awaited<ReturnType<typeof makeOrg>>;
@@ -60,28 +78,28 @@ describe("deleting departments, teams and projects", () => {
 
   describe("permissions", () => {
     it.each(["manager", "member", "viewer", "norole", "deptAdmin", "teamAdmin"])("%s cannot delete a department", async (k) => {
-      const r = await code(withTenant(c.app, as(k), (s) => deleteDepartment(s, O.dept.id)));
+      const r = await code(delDept(as(k), O.dept.id));
       expect(["FORBIDDEN", "NOT_FOUND"]).toContain(r);
       const [row] = await c.admin.select({ deletedAt: departments.deletedAt }).from(departments).where(eq(departments.id, O.dept.id));
       expect(row!.deletedAt).toBeNull();
     });
 
     it.each(["manager", "member", "viewer", "norole", "teamAdmin"])("%s cannot delete a team", async (k) => {
-      const r = await code(withTenant(c.app, as(k), (s) => deleteTeam(s, O.team.id)));
+      const r = await code(delTeam(as(k), O.team.id));
       expect(["FORBIDDEN", "NOT_FOUND"]).toContain(r);
       const [row] = await c.admin.select({ deletedAt: teams.deletedAt }).from(teams).where(eq(teams.id, O.team.id));
       expect(row!.deletedAt).toBeNull();
     });
 
     it.each(["manager", "member", "viewer", "norole"])("%s cannot delete a project", async (k) => {
-      const r = await code(withTenant(c.app, as(k), (s) => deleteProject(s, O.project.id)));
+      const r = await code(delProject(as(k), O.project.id));
       expect(["FORBIDDEN", "NOT_FOUND"]).toContain(r);
       const [row] = await c.admin.select({ deletedAt: projects.deletedAt }).from(projects).where(eq(projects.id, O.project.id));
       expect(row!.deletedAt).toBeNull();
     });
 
     it("a department administrator cannot delete a team of another department", async () => {
-      const r = await code(withTenant(c.app, as("deptAdmin"), (s) => deleteTeam(s, team2.id)));
+      const r = await code(delTeam(as("deptAdmin"), team2.id));
       expect(["FORBIDDEN", "NOT_FOUND"]).toContain(r);
       const [row] = await c.admin.select({ deletedAt: teams.deletedAt }).from(teams).where(eq(teams.id, team2.id));
       expect(row!.deletedAt).toBeNull();
@@ -89,15 +107,15 @@ describe("deleting departments, teams and projects", () => {
 
     it("an administrator of another organization cannot reach this organization's structure at all", async () => {
       const ctx = { userId: u.otherAdmin!.id, orgId: O.org.id };
-      expect(await code(withTenant(c.app, ctx, (s) => deleteDepartment(s, O.dept.id)))).toBe("NOT_FOUND");
-      expect(await code(withTenant(c.app, ctx, (s) => deleteTeam(s, O.team.id)))).toBe("NOT_FOUND");
-      expect(await code(withTenant(c.app, ctx, (s) => deleteProject(s, O.project.id)))).toBe("NOT_FOUND");
+      expect(await code(delDept(ctx, O.dept.id))).toBe("NOT_FOUND");
+      expect(await code(delTeam(ctx, O.team.id))).toBe("NOT_FOUND");
+      expect(await code(delProject(ctx, O.project.id))).toBe("NOT_FOUND");
     });
 
     it("an administrator cannot delete another organization's structure by passing its ids to their own organization", async () => {
-      expect(await code(withTenant(c.app, as("admin"), (s) => deleteDepartment(s, O2.dept.id)))).toBe("NOT_FOUND");
-      expect(await code(withTenant(c.app, as("admin"), (s) => deleteTeam(s, O2.team.id)))).toBe("NOT_FOUND");
-      expect(await code(withTenant(c.app, as("admin"), (s) => deleteProject(s, O2.project.id)))).toBe("NOT_FOUND");
+      expect(await code(delDept(as("admin"), O2.dept.id))).toBe("NOT_FOUND");
+      expect(await code(delTeam(as("admin"), O2.team.id))).toBe("NOT_FOUND");
+      expect(await code(delProject(as("admin"), O2.project.id))).toBe("NOT_FOUND");
       const rows = await c.admin.select({ d: departments.deletedAt }).from(departments).where(eq(departments.orgId, O2.org.id));
       expect(rows.every((r) => r.d === null)).toBe(true);
       const t = await c.admin.select({ d: teams.deletedAt }).from(teams).where(eq(teams.orgId, O2.org.id));
@@ -108,7 +126,182 @@ describe("deleting departments, teams and projects", () => {
 
     it("a department administrator may delete a team inside their own department", async () => {
       const [made] = await c.admin.insert(teams).values({ orgId: O.org.id, departmentId: O.dept.id, name: "Disposable" }).returning({ id: teams.id });
-      expect(await code(withTenant(c.app, as("deptAdmin"), (s) => deleteTeam(s, made!.id)))).toBe("OK");
+      expect(await code(delTeam(as("deptAdmin"), made!.id))).toBe("OK");
+    });
+  });
+
+  describe("typed confirmation", () => {
+    it("a wrong, empty, other or differently cased name deletes nothing, for all three kinds", async () => {
+      const d = await withTenant(c.app, as("admin"), (s) => createDepartment(s, { name: "Typed Dept" }));
+      const t = await withTenant(c.app, as("admin"), (s) => createTeam(s, { departmentId: d.id, name: "Typed Team" }));
+      const p = await withTenant(c.app, as("admin"), (s) => createProject(s, { name: "Typed Project" }));
+      const wrong = ["", "   ", "typed dept", "Typed Dep", "Typed Team", "Typed Project", O.dept.name, "Typed Dept!", "Typed\u200b Dept"];
+      for (const typed of wrong) expect(await code(delDept(as("admin"), d.id, typed)), `dept ${JSON.stringify(typed)}`).toBe("VALIDATION");
+      for (const typed of ["", "typed team", "Typed Dept", "Typed Teams"]) expect(await code(delTeam(as("admin"), t.id, typed)), `team ${JSON.stringify(typed)}`).toBe("VALIDATION");
+      for (const typed of ["", "typed project", "Typed Team", "Typed Projec"]) expect(await code(delProject(as("admin"), p.id, typed)), `project ${JSON.stringify(typed)}`).toBe("VALIDATION");
+      const [dr] = await c.admin.select({ d: departments.deletedAt }).from(departments).where(eq(departments.id, d.id));
+      const [tr] = await c.admin.select({ d: teams.deletedAt }).from(teams).where(eq(teams.id, t.id));
+      const [pr] = await c.admin.select({ d: projects.deletedAt }).from(projects).where(eq(projects.id, p.id));
+      expect([dr!.d, tr!.d, pr!.d]).toEqual([null, null, null]);
+      expect((await c.admin.select().from(auditLogs).where(and(eq(auditLogs.orgId, O.org.id), inArray(auditLogs.targetId, [d.id, t.id, p.id]), inArray(auditLogs.action, ["department.delete", "team.delete", "project.delete"])))).length).toBe(0);
+      // the right name works, with sloppy spacing and in another Unicode form of the same text
+      expect(await code(delTeam(as("admin"), t.id, "  Typed   Team "))).toBe("OK");
+      expect(await code(delProject(as("admin"), p.id, "Typed Project"))).toBe("OK");
+      expect(await code(delDept(as("admin"), d.id, "Typed Dept"))).toBe("OK");
+    });
+
+    it("a name that needs normalizing is accepted in either Unicode form", async () => {
+      const d = await withTenant(c.app, as("admin"), (s) => createDepartment(s, { name: "Caf\u00e9 team" }));
+      expect(await code(delDept(as("admin"), d.id, "Cafe\u0301 team"))).toBe("OK");
+    });
+
+    it("the permission is judged first: someone who may not delete learns nothing about whether the name matched", async () => {
+      expect(await code(delDept(as("member"), O.dept.id, "definitely not the name"))).toBe("FORBIDDEN");
+      expect(await code(delTeam(as("member"), O.team.id, "definitely not the name"))).toBe("FORBIDDEN");
+      expect(await code(delProject(as("member"), O.project.id, "definitely not the name"))).toBe("FORBIDDEN");
+    });
+
+    it("over HTTP the name is required in the body: none, an empty body, extra fields and a wrong name are all 422 and change nothing", async () => {
+      const authApp = makeAuthApp(c.app);
+      const { client, email } = await registerAndSignIn(authApp, "typedadmin");
+      const [au] = await c.admin.select({ id: users.id }).from(users).where(eq(users.email, email));
+      await addMember(c.admin, O.org.id, au!.id, { role: "orgadmin" });
+      const d = await withTenant(c.app, as("admin"), (s) => createDepartment(s, { name: "Http Dept" }));
+      const t = await withTenant(c.app, as("admin"), (s) => createTeam(s, { departmentId: d.id, name: "Http Team" }));
+      const p = await withTenant(c.app, as("admin"), (s) => createProject(s, { name: "Http Project" }));
+      const call = (handler: unknown, path: string, params: Record<string, string>, body?: unknown) =>
+        client.route(handler as never, "DELETE", path, body, { orgId: O.org.id, ...params }).then((r) => r.status);
+      const dPath = `/api/orgs/${O.org.id}/departments/${d.id}`;
+      const tPath = `/api/orgs/${O.org.id}/teams/${t.id}`;
+      const pPath = `/api/orgs/${O.org.id}/projects/${p.id}`;
+      for (const body of [undefined, {}, { confirm: "" }, { confirm: "nope" }, { confirm: 5 }, { confirm: "Http Dept", extra: true }, { confirm: "x".repeat(301) }]) {
+        expect(await call(deptRoute.DELETE, dPath, { departmentId: d.id }, body), JSON.stringify(body)).toBe(422);
+      }
+      expect(await call(teamRoute.DELETE, tPath, { teamId: t.id })).toBe(422);
+      expect(await call(teamRoute.DELETE, tPath, { teamId: t.id }, { confirm: "Http Dept" })).toBe(422);
+      expect(await call(projectRoute.DELETE, pPath, { projectId: p.id })).toBe(422);
+      expect(await call(projectRoute.DELETE, pPath, { projectId: p.id }, { confirm: "http project" })).toBe(422);
+      const live = await c.admin.select({ d: departments.deletedAt }).from(departments).where(eq(departments.id, d.id));
+      expect(live[0]!.d).toBeNull();
+      expect(await call(teamRoute.DELETE, tPath, { teamId: t.id }, { confirm: "Http Team" })).toBe(200);
+      expect(await call(projectRoute.DELETE, pPath, { projectId: p.id }, { confirm: "Http Project" })).toBe(200);
+      expect(await call(deptRoute.DELETE, dPath, { departmentId: d.id }, { confirm: "Http Dept" })).toBe(200);
+      // gone: a repeat is a 404, even with the right name
+      expect(await call(deptRoute.DELETE, dPath, { departmentId: d.id }, { confirm: "Http Dept" })).toBe(404);
+    });
+  });
+
+  describe("creating something under a thing while it is being deleted", () => {
+    /** Runs `fn` in a tenant transaction and keeps the transaction open until `release()` is called. */
+    function held<T>(ctx: Ctx, fn: (s: Parameters<Parameters<typeof withTenant>[2]>[0]) => Promise<T>) {
+      let release!: () => void;
+      let reached!: () => void;
+      const gate = new Promise<void>((r) => { release = r; });
+      const didWork = new Promise<void>((r) => { reached = r; });
+      const done = withTenant(c.app, ctx, async (s) => { const out = await fn(s); reached(); await gate; return out; });
+      return { done, release, didWork };
+    }
+    const stillWaiting = async (p: Promise<unknown>) => {
+      const settled = await Promise.race([p.then(() => "settled", () => "settled"), new Promise<string>((r) => setTimeout(() => r("waiting"), 400))]);
+      return settled === "waiting";
+    };
+
+    it("a team cannot be added to a department whose deletion is in progress, nor survive a deletion that starts after it", async () => {
+      // deletion first
+      const d1 = await withTenant(c.app, as("admin"), (s) => createDepartment(s, { name: "Race dept 1" }));
+      const del = held(as("admin"), (s) => deleteDepartment(s, d1.id, "Race dept 1"));
+      await del.didWork;
+      const create = withTenant(c.app, as("admin"), (s) => createTeam(s, { departmentId: d1.id, name: "Late team" }));
+      expect(await stillWaiting(create)).toBe(true);
+      del.release();
+      await del.done;
+      expect(await code(create)).toBe("NOT_FOUND");
+      expect(await c.admin.select().from(teams).where(and(eq(teams.departmentId, d1.id), isNull(teams.deletedAt)))).toHaveLength(0);
+
+      // creation first: the deletion waits for it and then takes the new team along
+      const d2 = await withTenant(c.app, as("admin"), (s) => createDepartment(s, { name: "Race dept 2" }));
+      const make = held(as("admin"), (s) => createTeam(s, { departmentId: d2.id, name: "Early team" }));
+      await make.didWork;
+      const remove = delDept(as("admin"), d2.id);
+      expect(await stillWaiting(remove)).toBe(true);
+      make.release();
+      await make.done;
+      expect(await remove).toMatchObject({ teams: 1 });
+      expect(await c.admin.select().from(teams).where(and(eq(teams.departmentId, d2.id), isNull(teams.deletedAt)))).toHaveLength(0);
+    });
+
+    it("a task cannot be created in a project whose deletion is in progress, and one created just before is deleted with it", async () => {
+      const p1 = await withTenant(c.app, as("admin"), (s) => createProject(s, { name: "Race project 1" }));
+      const del = held(as("admin"), (s) => deleteProject(s, p1.id, "Race project 1"));
+      await del.didWork;
+      const create = withTenant(c.app, as("admin"), (s) => createTask(s, { projectId: p1.id, title: "Late task" }));
+      expect(await stillWaiting(create)).toBe(true);
+      del.release();
+      await del.done;
+      expect(await code(create)).toBe("NOT_FOUND");
+      expect(await c.admin.select().from(tasks).where(and(eq(tasks.projectId, p1.id), isNull(tasks.deletedAt)))).toHaveLength(0);
+
+      const p2 = await withTenant(c.app, as("admin"), (s) => createProject(s, { name: "Race project 2" }));
+      const make = held(as("admin"), (s) => createTask(s, { projectId: p2.id, title: "Early task" }));
+      await make.didWork;
+      const remove = delProject(as("admin"), p2.id);
+      expect(await stillWaiting(remove)).toBe(true);
+      make.release();
+      await make.done;
+      expect(await remove).toMatchObject({ tasks: 1 });
+      expect(await c.admin.select().from(tasks).where(and(eq(tasks.projectId, p2.id), isNull(tasks.deletedAt)))).toHaveLength(0);
+    });
+
+    it("a role cannot be given for a team being deleted, and one given just before is removed with the team", async () => {
+      const member = await makeUser(c.admin, "racer");
+      const [mem] = await c.admin.insert(memberships).values({ orgId: O.org.id, userId: member.id, status: "approved" }).returning({ id: memberships.id });
+      const roleId = await systemRoleId(c.admin, "member");
+      const d = await withTenant(c.app, as("admin"), (s) => createDepartment(s, { name: "Race dept 3" }));
+      const t1 = await withTenant(c.app, as("admin"), (s) => createTeam(s, { departmentId: d.id, name: "Race team 1" }));
+      const del = held(as("admin"), (s) => deleteTeam(s, t1.id, "Race team 1"));
+      await del.didWork;
+      const give = withTenant(c.app, as("admin"), (s) => assignRole(s, { membershipId: mem!.id, roleId, scope: { type: "team", id: t1.id } }));
+      expect(await stillWaiting(give)).toBe(true);
+      del.release();
+      await del.done;
+      expect(await code(give)).toBe("NOT_FOUND");
+      expect(await c.admin.select().from(roleAssignments).where(eq(roleAssignments.teamId, t1.id))).toHaveLength(0);
+
+      const t2 = await withTenant(c.app, as("admin"), (s) => createTeam(s, { departmentId: d.id, name: "Race team 2" }));
+      const grant = held(as("admin"), (s) => assignRole(s, { membershipId: mem!.id, roleId, scope: { type: "team", id: t2.id } }));
+      await grant.didWork;
+      const remove = delTeam(as("admin"), t2.id);
+      expect(await stillWaiting(remove)).toBe(true);
+      grant.release();
+      await grant.done;
+      await remove;
+      expect(await c.admin.select().from(roleAssignments).where(eq(roleAssignments.teamId, t2.id))).toHaveLength(0);
+    });
+
+    it("a team cannot be linked to a project, and a Discord channel cannot be created for a team or project, while that thing is being deleted", async () => {
+      const d = await withTenant(c.app, as("admin"), (s) => createDepartment(s, { name: "Race dept 4" }));
+      const t = await withTenant(c.app, as("admin"), (s) => createTeam(s, { departmentId: d.id, name: "Race team 3" }));
+      const p = await withTenant(c.app, as("admin"), (s) => createProject(s, { name: "Race project 3" }));
+      const del = held(as("admin"), (s) => deleteTeam(s, t.id, "Race team 3"));
+      await del.didWork;
+      const link = withTenant(c.app, as("admin"), (s) => setProjectTeams(s, p.id, [t.id]));
+      const dest = withTenant(c.app, as("admin"), (s) => createDestination(s, { encryptionKeys: [Buffer.alloc(32, 3).toString("base64")] } as never, { name: "Chan", teamId: t.id, events: ["task.created"], webhookUrl: `https://discord.com/api/webhooks/123456789012345678/${"a".repeat(40)}` } as never));
+      expect(await stillWaiting(link)).toBe(true);
+      expect(await stillWaiting(dest)).toBe(true);
+      del.release();
+      await del.done;
+      expect(await code(link)).toBe("NOT_FOUND");
+      expect(await code(dest)).toBe("NOT_FOUND");
+      expect(await c.admin.select().from(projectTeams).where(eq(projectTeams.teamId, t.id))).toHaveLength(0);
+      expect(await c.admin.select().from(integrationDestinations).where(and(eq(integrationDestinations.teamId, t.id), isNull(integrationDestinations.deletedAt)))).toHaveLength(0);
+
+      const del2 = held(as("admin"), (s) => deleteProject(s, p.id, "Race project 3"));
+      await del2.didWork;
+      const dest2 = withTenant(c.app, as("admin"), (s) => createDestination(s, { encryptionKeys: [Buffer.alloc(32, 3).toString("base64")] } as never, { name: "Chan2", projectId: p.id, events: ["task.created"], webhookUrl: `https://discord.com/api/webhooks/123456789012345678/${"b".repeat(40)}` } as never));
+      expect(await stillWaiting(dest2)).toBe(true);
+      del2.release();
+      await del2.done;
+      expect(await code(dest2)).toBe("NOT_FOUND");
     });
   });
 
@@ -126,7 +319,7 @@ describe("deleting departments, teams and projects", () => {
       const before = await c.admin.select({ n: roleAssignments.id }).from(roleAssignments).where(eq(roleAssignments.teamId, O.team.id));
       expect(before.length).toBeGreaterThan(0);
 
-      await withTenant(c.app, as("admin"), (s) => deleteTeam(s, O.team.id));
+      await delTeam(as("admin"), O.team.id);
 
       const listed = await withTenant(c.app, as("admin"), (s) => listTeams(s));
       expect(listed.map((t) => t.id)).not.toContain(O.team.id);
@@ -157,10 +350,16 @@ describe("deleting departments, teams and projects", () => {
       const [audit] = await c.admin.select().from(auditLogs).where(and(eq(auditLogs.orgId, O.org.id), eq(auditLogs.action, "team.delete"), eq(auditLogs.targetId, O.team.id)));
       expect(audit).toBeTruthy();
       expect(audit!.actorUserId).toBe(u.admin!.id);
+      // what the deletion took away is on record: counts, and one role.unassign entry per access that was removed
+      expect(audit!.metadata).toMatchObject({ assignments: before.length, projectLinks: 1, views: 1, destinations: 1 });
+      const unassigned = (await c.admin.select().from(auditLogs).where(and(eq(auditLogs.orgId, O.org.id), eq(auditLogs.action, "role.unassign")))).filter((a) => (a.metadata as { via?: string; scopeId?: string }).via === "team.delete" && (a.metadata as { scopeId?: string }).scopeId === O.team.id);
+      expect(unassigned).toHaveLength(before.length);
+      expect(unassigned.every((a) => (a.metadata as { scopeId: string }).scopeId === O.team.id && typeof (a.metadata as { membershipId: string }).membershipId === "string")).toBe(true);
+      expect(new Set(unassigned.map((a) => a.targetId))).toEqual(new Set(before.map((b) => b.n)));
     });
 
     it("cannot be deleted twice, and a deleted team cannot be given to a project again", async () => {
-      expect(await code(withTenant(c.app, as("admin"), (s) => deleteTeam(s, O.team.id)))).toBe("NOT_FOUND");
+      expect(await code(delTeam(as("admin"), O.team.id))).toBe("NOT_FOUND");
       expect(await code(withTenant(c.app, as("admin"), (s) => setProjectTeams(s, O.project.id, [O.team.id])))).toBe("NOT_FOUND");
     });
   });
@@ -178,7 +377,7 @@ describe("deleting departments, teams and projects", () => {
       const teamMember = await makeUser(c.admin, "t2member");
       await addMember(c.admin, O.org.id, teamMember.id, { role: "member", scope: { type: "team", id: t2.id } });
 
-      const res = await withTenant(c.app, as("admin"), (s) => deleteDepartment(s, d.id));
+      const res = await delDept(as("admin"), d.id);
       expect(res.teams).toBe(2);
 
       expect((await withTenant(c.app, as("admin"), (s) => listDepartments(s))).map((x) => x.id)).not.toContain(d.id);
@@ -207,14 +406,14 @@ describe("deleting departments, teams and projects", () => {
 
       // a new team cannot be added to a deleted department
       expect(await code(withTenant(c.app, as("admin"), (s) => createTeam(s, { departmentId: d.id, name: "late" })))).toBe("NOT_FOUND");
-      expect(await code(withTenant(c.app, as("admin"), (s) => deleteDepartment(s, d.id)))).toBe("NOT_FOUND");
+      expect(await code(delDept(as("admin"), d.id))).toBe("NOT_FOUND");
     });
 
     it("a member's membership survives when their only (department) role is removed - they just lose access", async () => {
       const d = await withTenant(c.app, as("admin"), (s) => createDepartment(s, { name: "Another one" }));
       const person = await makeUser(c.admin, "lonely");
       await addMember(c.admin, O.org.id, person.id, { role: "member", scope: { type: "department", id: d.id } });
-      await withTenant(c.app, as("admin"), (s) => deleteDepartment(s, d.id));
+      await delDept(as("admin"), d.id);
       expect(await withTenant(c.app, { userId: person.id, orgId: O.org.id }, (s) => listProjects(s))).toEqual([]);
     });
   });
@@ -236,7 +435,7 @@ describe("deleting departments, teams and projects", () => {
       const projectMember = await makeUser(c.admin, "projmember");
       await addMember(c.admin, O.org.id, projectMember.id, { role: "member", scope: { type: "project", id: proj } });
 
-      const res = await withTenant(c.app, as("admin"), (s) => deleteProject(s, proj));
+      const res = await delProject(as("admin"), proj);
       expect(res.tasks).toBe(2);
 
       expect((await withTenant(c.app, as("admin"), (s) => listProjects(s))).map((p) => p.id)).not.toContain(proj);
@@ -268,13 +467,13 @@ describe("deleting departments, teams and projects", () => {
       const [audit] = await c.admin.select().from(auditLogs).where(and(eq(auditLogs.orgId, O.org.id), eq(auditLogs.action, "project.delete"), eq(auditLogs.targetId, proj)));
       expect(audit!.metadata).toMatchObject({ tasks: 2 });
 
-      expect(await code(withTenant(c.app, as("admin"), (s) => deleteProject(s, proj)))).toBe("NOT_FOUND");
+      expect(await code(delProject(as("admin"), proj))).toBe("NOT_FOUND");
     });
 
     it("a trashed task of a deleted project cannot be brought back to life by the person who deleted it", async () => {
       const proj = (await withTenant(c.app, as("admin"), (s) => createProject(s, { name: "No way back" }))).id;
       const [t] = await c.admin.insert(tasks).values({ orgId: O.org.id, projectId: proj, title: "Gone", createdBy: u.admin!.id }).returning({ id: tasks.id });
-      await withTenant(c.app, as("admin"), (s) => deleteProject(s, proj));
+      await delProject(as("admin"), proj);
       const { restoreTask } = await import("@/data/tasks");
       expect(await code(withTenant(c.app, as("admin"), (s) => restoreTask(s, t!.id)))).toBe("NOT_FOUND");
     });

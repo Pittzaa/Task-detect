@@ -6,7 +6,7 @@ import { uploadLargeFile } from "./upload-large";
 import { Markdown } from "../markdown";
 import { allMessages } from "@/i18n";
 import { api, ApiError } from "../api";
-import { Btn, Drawer, Empty, ErrorNote, Field, Loading, Notice, PriorityBadge, StatusBadge, useToast } from "../components";
+import { Btn, Drawer, Empty, ErrorNote, Field, Loading, Notice, PriorityBadge, StatusBadge, useToast, useTypedConfirm } from "../components";
 import { useQuery } from "../hooks";
 import { useChangeSignal } from "../signals";
 import { useI18n } from "../i18n";
@@ -44,6 +44,7 @@ function DrawerBody({ task, reload, onClose, onOpen }: { task: Detail; reload: (
   const { orgId } = useOrg();
   const { t, err, date, instant, locale } = useI18n();
   const toast = useToast();
+  const confirmDelete = useTypedConfirm();
   const p = task.permissions;
   const people = useQuery<{ people: Person[] }>(`people:${orgId}:${task.projectId}`, () => api(`/api/orgs/${orgId}/projects/${task.projectId}/people`));
   const labels = useQuery<{ labels: Label[] }>(`labels:${orgId}`, () => api(`/api/orgs/${orgId}/labels`));
@@ -82,6 +83,7 @@ function DrawerBody({ task, reload, onClose, onOpen }: { task: Detail; reload: (
 
   return (
     <div className="stack">
+      {confirmDelete.dialog}
       <div className="row">
         <StatusBadge status={task.status} /><PriorityBadge priority={task.priority} />
         {task.seriesId && <span className="badge" data-p="low">↻ {t("ui.series_note")}</span>}
@@ -184,7 +186,7 @@ function DrawerBody({ task, reload, onClose, onOpen }: { task: Detail; reload: (
           {files.data?.attachments.map((f) => (
             <li key={f.id}>
               <a href={`/api/orgs/${orgId}/attachments/${f.id}`} download>{f.filename}</a> <span className="muted small">({Math.max(1, Math.round(f.sizeBytes / 1024))} KB)</span>
-              {p.attach && <Btn small kind="ghost" aria-label={t("ui.delete")} onClick={async () => { await api(`/api/orgs/${orgId}/attachments/${f.id}`, { method: "DELETE" }).catch((e) => toast(err(e), "error")); files.reload(); }}>✕</Btn>}
+              {p.attach && <Btn small kind="ghost" aria-label={`${t("ui.delete")}: ${f.filename}`} onClick={() => confirmDelete.ask({ phrase: f.filename, body: t("ui.confirm_delete_attachment"), run: async () => { await api(`/api/orgs/${orgId}/attachments/${f.id}`, { method: "DELETE" }); files.reload(); } })}>✕</Btn>}
             </li>
           ))}
         </ul>

@@ -88,6 +88,20 @@ describe("personal data export", () => {
     expect(JSON.stringify(data)).not.toContain("In a project I cannot read");
   });
 
+  it("treats work in a deleted project the same for a member and for an administrator: left out, and counted", async () => {
+    for (const role of ["member", "orgadmin"]) {
+      const p = await person(`expdel${role}`, role);
+      const [proj] = await c.admin.execute(sql`insert into projects (org_id, name) values (${p.O.org.id}, 'Soon gone') returning id`).then((r) => (r as unknown as { rows: { id: string }[] }).rows);
+      await c.admin.insert(tasks).values({ orgId: p.O.org.id, projectId: proj!.id, title: `Mine in a deleted project (${role})`, createdBy: p.id });
+      const before = await (await p.client.route(exportRoute as never, "GET", "/api/me/export")).json();
+      expect(JSON.stringify(before), `${role} before`).toContain("deleted project");
+      await c.admin.execute(sql`update projects set deleted_at = now() where id = ${proj!.id}`);
+      const after = await (await p.client.route(exportRoute as never, "GET", "/api/me/export")).json();
+      expect(JSON.stringify(after), `${role} after`).not.toContain("deleted project");
+      expect(after.organizations[0].tasksNotShown, role).toBe(1);
+    }
+  });
+
   it("requires a session", async () => {
     const res = await new Client(app.auth).route(exportRoute as never, "GET", "/api/me/export");
     expect(res.status).toBe(401);

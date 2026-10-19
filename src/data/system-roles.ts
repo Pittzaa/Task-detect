@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { SYSTEM_ROLE_KEYS, SYSTEM_ROLE_PERMISSIONS } from "@/authz/permissions";
 import type { Db } from "@/db/client";
 import { rolePermissions, roles } from "@/db/schema";
@@ -10,6 +10,9 @@ import { rolePermissions, roles } from "@/db/schema";
 export async function syncSystemRoles(db: Db): Promise<Map<string, string>> {
   const ids = new Map<string, string>();
   await db.transaction(async (tx) => {
+    // Two runs at once (two operators, or a script racing a bootstrap) would both delete and re-insert the same permission rows
+    // and one would fail on the primary key. They take turns instead.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('task-tracker:system-roles'))`);
     for (const key of SYSTEM_ROLE_KEYS) {
       let [role] = await tx
         .select({ id: roles.id })

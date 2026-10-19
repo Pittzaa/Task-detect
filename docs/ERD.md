@@ -51,6 +51,7 @@ erDiagram
     text slug
     timestamp_with_time_zone created_at
     timestamp_with_time_zone deleted_at
+    boolean registration_open
   }
   memberships {
     uuid id PK

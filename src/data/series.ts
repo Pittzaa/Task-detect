@@ -46,7 +46,7 @@ function needAssignRight(s: TenantSession, scope: Parameters<typeof can>[2], bef
 }
 
 export async function createSeries(s: TenantSession, input: SeriesInput, todayOverride?: string) {
-  const scope = await projectScope(s, input.projectId);
+  const scope = await projectScope(s, input.projectId, { lock: true });
   if (!scope || !can(s.principal, "task.read", scope)) throw notFound();
   if (!can(s.principal, "series.manage", scope) || !can(s.principal, "task.create", scope)) throw forbidden({ permission: "series.manage" });
   const rule = ruleSchema.safeParse(input.rule);
@@ -88,8 +88,8 @@ export async function generateOccurrences(s: TenantSession, series: SeriesRow, t
     await s.tx.update(recurrenceSeries).set({ generatedThrough: horizon }).where(eq(recurrenceSeries.id, series.id));
     return 0;
   }
-  const scope = await projectScope(s, series.projectId);
-  if (!scope || !can(s.principal, "task.create", scope)) return 0; // creator lost access: generate nothing
+  const scope = await projectScope(s, series.projectId, { lock: true });
+  if (!scope || !can(s.principal, "task.create", scope)) return 0; // creator lost access (or the project was deleted): generate nothing
   // Re-check the assignee now; someone who lost access gets an unassigned occurrence instead of a stale grant.
   const assignee = series.primaryAssigneeId && (await assignable(s, series.primaryAssigneeId, scope)) ? series.primaryAssigneeId : null;
 

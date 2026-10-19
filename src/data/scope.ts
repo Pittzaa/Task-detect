@@ -10,13 +10,16 @@ export type OrgCtx = Pick<TenantSession, "tx" | "orgId">;
 /**
  * Authorization scope of a project: itself plus every team and department participating in it.
  * Team/department-scoped role assignments cover the project (and so its tasks) through these ids.
- * Returns null when the project does not exist in this organization (or is deleted).
+ * Returns null when the project does not exist in this organization (or is deleted). Pass `lock` from writers that add rows under it.
  */
-export async function projectScope(s: OrgCtx, projectId: string): Promise<ResourceScope | null> {
-  const [p] = await s.tx
+export async function projectScope(s: OrgCtx, projectId: string, opts: { lock?: boolean } = {}): Promise<ResourceScope | null> {
+  const q = s.tx
     .select({ id: projects.id })
     .from(projects)
     .where(and(eq(projects.orgId, s.orgId), eq(projects.id, projectId), isNull(projects.deletedAt)));
+  // `lock`: for anything about to create or revive rows under the project. A share lock waits for a deletion in progress (and the
+  // deletion waits for us), and once that deletion has committed the row no longer matches, so nothing ends up in a deleted project.
+  const [p] = opts.lock ? await q.for("share") : await q;
   if (!p) return null;
   const rows = await s.tx
     .select({ teamId: teams.id, departmentId: teams.departmentId })

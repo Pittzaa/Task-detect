@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { getEnv } from "@/config/env";
-import { EXPECTED_MIGRATIONS } from "@/config/schema-version";
+import { migrationsStatus } from "@/config/schema-version";
 import { checkRlsEnforceable } from "@/db/client";
 import { safeEqual } from "@/lib/crypto";
 import { queueStats } from "@/jobs/queue";
@@ -28,7 +28,7 @@ export async function GET(req: Request) {
   const rls = await checkRlsEnforceable(db).catch(() => "check failed");
   checks.rowLevelSecurity = rls ? { ok: false, detail: rls } : { ok: true };
   const applied = (await db.execute(sql`select count(*)::int as n from drizzle.__drizzle_migrations`).then((r) => (r as unknown as { rows: { n: number }[] }).rows[0]?.n).catch(() => -1)) ?? -1;
-  checks.migrations = applied === EXPECTED_MIGRATIONS ? { ok: true, detail: applied } : { ok: false, detail: `database has ${applied}, build expects ${EXPECTED_MIGRATIONS}` };
+  checks.migrations = migrationsStatus(applied);
   const q = await queueStats(db).catch(() => null);
   const queueOk = !!q && q.dead === 0 && q.stuck === 0 && q.oldestPendingSeconds <= 600;
   checks.jobs = q ? { ok: queueOk, detail: `pending ${q.pending}, dead ${q.dead}, stuck ${q.stuck}, oldest pending ${q.oldestPendingSeconds}s` } : { ok: false, detail: "unreadable" };

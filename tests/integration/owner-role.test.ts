@@ -211,4 +211,48 @@ describe("a plain (non-superuser, non-BYPASSRLS) database owner", () => {
       await sup.query(`create policy audit_retention on audit_logs for delete to ${OWNER} using (created_at < now() - interval '90 days')`);
     }
   });
+
+  it("a deleted organization is not invited into again, and two bootstraps at the same moment create only one organization", async () => {
+    const { db, close } = createDb(withDb(OWNER, "owner", DB));
+    const live = (await sup.query(`select id from organizations where deleted_at is null`)).rows.map((r) => r.id as string);
+    try {
+      await sup.query(`update organizations set deleted_at = now() where deleted_at is null`);
+      // the code of a deleted organization
+      const dead = (await sup.query(`insert into organizations (name, slug, deleted_at) values ('Dead', 'dead-org', now()) returning id`)).rows[0].id as string;
+      await expect(bootstrapOrganization(db, { name: "Dead", slug: "dead-org", adminEmail: "x@example.test", appUrl: "https://tasks.example.test" })).rejects.toThrow(/was deleted/);
+      expect((await sup.query(`select count(*)::int as n from invitations where org_id = $1`, [dead])).rows[0].n).toBe(0);
+      // many at once, different codes: exactly one may win
+      const codes = Array.from({ length: 8 }, (_, i) => `race-${i}`);
+      const results = await Promise.allSettled(codes.map((slug) => bootstrapOrganization(db, { name: slug, slug, adminEmail: `${slug}@example.test`, appUrl: "https://tasks.example.test" })));
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      for (const r of results.filter((x): x is PromiseRejectedResult => x.status === "rejected")) expect(String(r.reason)).toMatch(/already has an organization/);
+      expect((await sup.query(`select count(*)::int as n from organizations where slug like 'race-%'`)).rows[0].n).toBe(1);
+    } finally {
+      await sup.query(`update organizations set deleted_at = now() where slug like 'race-%' or slug = 'dead-org'`);
+      if (live.length) await sup.query(`update organizations set deleted_at = null where id = any($1::uuid[])`, [live]);
+      await close();
+    }
+  });
+
+  it("bootstrap and the system-role sync take turns: each waits while another operator holds its lock", async () => {
+    const { db, close } = createDb(withDb(OWNER, "owner", DB));
+    const live = (await sup.query(`select id from organizations where deleted_at is null`)).rows.map((r) => r.id as string);
+    const waiting = async (p: Promise<unknown>) => (await Promise.race([p.then(() => "done", () => "done"), new Promise<string>((r) => setTimeout(() => r("waiting"), 500))])) === "waiting";
+    try {
+      await sup.query(`update organizations set deleted_at = now() where deleted_at is null`);
+      for (const key of ["task-tracker:system-roles", "task-tracker:bootstrap"]) {
+        await sup.query(`select pg_advisory_lock(hashtext($1))`, [key]);
+        const run = bootstrapOrganization(db, { name: "Locked", slug: `locked-${key.split(":")[1]}`, adminEmail: "l@example.test", appUrl: "https://tasks.example.test" });
+        const stuck = await waiting(run);
+        await sup.query(`select pg_advisory_unlock(hashtext($1))`, [key]);
+        expect(stuck, key).toBe(true);
+        await run;
+        await sup.query(`update organizations set deleted_at = now() where slug like 'locked-%'`);
+      }
+    } finally {
+      await sup.query(`update organizations set deleted_at = now() where slug like 'locked-%'`);
+      if (live.length) await sup.query(`update organizations set deleted_at = null where id = any($1::uuid[])`, [live]);
+      await close();
+    }
+  });
 });

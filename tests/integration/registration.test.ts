@@ -4,7 +4,7 @@ import { AppError } from "@/lib/errors";
 import { withTenant } from "@/data/tenant";
 import { getOrgSettings, setRegistrationOpen } from "@/data/org-settings";
 import { requestAccess } from "@/data/account";
-import { CLOSED_SIGNUP_PER_HOUR, canRegister, refuseClosedSignUp, registrationState, soleOrganization } from "@/server/registration";
+import { CLOSED_SIGNUP_PER_HOUR, canRegister, guardSignUp, registrationState, soleOrganization } from "@/server/registration";
 import { POST as authRoute } from "@/app/api/auth/[...all]/route";
 import { auditLogs, invitations, memberships, organizations, users } from "@/db/schema";
 import { GET as authConfigGET } from "@/app/api/auth-config/route";
@@ -224,9 +224,55 @@ describe("registration switch and the single organization", () => {
       } finally { await reset(); await setFlag(true); }
     });
 
-    it("a sign-up body that is not JSON is not looked at by the front check (the hook still decides)", async () => {
+    it("a sign-up that is not JSON is refused with 415 whatever the address, open or closed, so nothing can walk round the guard", async () => {
+      const form = (email: string, type = "application/x-www-form-urlencoded") => authRoute(new Request("http://localhost:3000/api/auth/sign-up/email", {
+        method: "POST", headers: { "content-type": type, origin: "http://localhost:3000" }, body: `email=${encodeURIComponent(email)}&password=${PASSWORD}&name=Form`,
+      }));
+      for (const open of [true, false]) {
+        await setFlag(open);
+        const invited = `form-invited-${Date.now()}-${open}@example.test`;
+        await invite(invited);
+        for (const type of ["application/x-www-form-urlencoded", "multipart/form-data; boundary=x", "text/plain", ""]) {
+          expect((await form(invited, type)).status, `${open} ${type}`).toBe(415);
+          expect((await form(`nobody-${Date.now()}@example.test`, type)).status, `${open} ${type}`).toBe(415);
+        }
+        expect(await c.admin.select({ id: users.id }).from(users).where(eq(users.email, invited))).toHaveLength(0);
+      }
+      await setFlag(true);
+    });
+
+    it("a bad name or image gets the same answer for an address that has an account and one that has not, and for an invited and an uninvited address while closed", async () => {
+      const send = async (email: string, extra: Record<string, unknown>) => authRoute(new Request("http://localhost:3000/api/auth/sign-up/email", {
+        method: "POST", headers: { "content-type": "application/json", origin: "http://localhost:3000" }, body: JSON.stringify({ email, password: PASSWORD, name: "Fine", ...extra }),
+      }));
+      await setFlag(true);
+      const { email: registered } = await registerAndSignIn(app, "oracle");
+      const answers = await Promise.all([registered, `new-${Date.now()}@example.test`].map(async (e) => {
+        const res = await send(e, { name: "" });
+        return [res.status, await res.json()];
+      }));
+      expect(answers[0]).toEqual(answers[1]);
+      expect(answers[0]![0]).toBe(400);
+      expect((answers[0]![1] as { code: string }).code).toBe("INVALID_NAME");
+      expect((await send(registered, { image: "x".repeat(2049) })).status).toBe(400);
+      expect((await send(`new2-${Date.now()}@example.test`, { image: "x".repeat(2049) })).status).toBe(400);
+      expect((await send(`new3-${Date.now()}@example.test`, { name: "bad\u202ename" })).status).toBe(400);
+
       await setFlag(false);
-      const res = await refuseClosedSignUp(new Request("http://localhost:3000/api/auth/sign-up/email", { method: "POST", headers: { "content-type": "text/plain" }, body: "email=a@b.c" }), c.app);
+      await c.admin.execute(sql`delete from app_rate_limits where key = 'signup:closed'`);
+      const invited = `oracle-invited-${Date.now()}@example.test`;
+      await invite(invited);
+      const a = await send(invited, { name: "" });
+      const b = await send(`oracle-stranger-${Date.now()}@example.test`, { name: "" });
+      expect([a.status, await a.json()]).toEqual([b.status, await b.json()]);
+      expect(a.status).toBe(400);
+      await c.admin.execute(sql`delete from app_rate_limits where key = 'signup:closed'`);
+      await setFlag(true);
+    });
+
+    it("a sign-up body that cannot be read is left to Better Auth, which answers the same for everyone", async () => {
+      await setFlag(false);
+      const res = await guardSignUp(new Request("http://localhost:3000/api/auth/sign-up/email", { method: "POST", headers: { "content-type": "application/json" }, body: "{not json" }), c.app);
       expect(res).toBeNull();
       await setFlag(true);
     });

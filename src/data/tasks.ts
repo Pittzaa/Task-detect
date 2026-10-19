@@ -46,12 +46,12 @@ function need(s: TenantSession, permission: Permission, scope: ResourceScope) {
  * Loads a live task and its authorization scope. A task the principal cannot read is reported as
  * NOT_FOUND (never FORBIDDEN) so the existence of other teams' tasks is not revealed.
  */
-export async function loadTask(s: TenantSession, taskId: string, opts: { forUpdate?: boolean; includeDeleted?: boolean } = {}) {
+export async function loadTask(s: TenantSession, taskId: string, opts: { forUpdate?: boolean; includeDeleted?: boolean; lockProject?: boolean } = {}) {
   const base = and(eq(tasks.orgId, s.orgId), eq(tasks.id, taskId), opts.includeDeleted ? undefined : isNull(tasks.deletedAt));
   const q = s.tx.select().from(tasks).where(base);
   const [task] = opts.forUpdate ? await q.for("update") : await q;
   if (!task) throw notFound();
-  const scope = await projectScope(s, task.projectId);
+  const scope = await projectScope(s, task.projectId, { lock: opts.lockProject });
   if (!scope || !can(s.principal, "task.read", scope)) throw notFound();
   return { task, scope };
 }
@@ -106,7 +106,7 @@ export interface CreateTaskInput {
 }
 
 export async function createTask(s: TenantSession, input: CreateTaskInput) {
-  const scope = await projectScope(s, input.projectId);
+  const scope = await projectScope(s, input.projectId, { lock: true });
   if (!scope || !can(s.principal, "task.read", scope)) throw notFound();
   need(s, "task.create", scope);
 
@@ -347,7 +347,7 @@ export async function deleteTask(s: TenantSession, taskId: string) {
 }
 
 export async function restoreTask(s: TenantSession, taskId: string) {
-  const { task, scope } = await loadTask(s, taskId, { includeDeleted: true, forUpdate: true });
+  const { task, scope } = await loadTask(s, taskId, { includeDeleted: true, forUpdate: true, lockProject: true });
   if (!task.deletedAt) throw conflict("Task is not deleted");
   need(s, "task.delete", scope);
   if (task.parentId) {

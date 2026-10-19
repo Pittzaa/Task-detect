@@ -80,20 +80,22 @@ Never restore over production first. Restore into a **new** database, verify, th
 1. Create a fresh Neon branch/database (or a local scratch database).
 2. If the archive is encrypted: `openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:BACKUP_PASSPHRASE -in X.dump.enc -out X.dump` and check `sha256sum -c X.dump.enc.sha256` first.
 3. `pg_restore --no-owner --no-privileges --exit-on-error --dbname='<new owner direct string>' X.dump`
+3b. **If the dump was taken by an older version than the one you are about to run** (check `select count(*) from drizzle.__drizzle_migrations` against `src/config/schema-version.ts`), bring the restored database up to date first: `DATABASE_URL_UNPOOLED='<new owner direct string>' pnpm db:migrate`. `scripts/grants.sql` refers to columns that only newer versions have (release 0014 added one), so on an older schema the grants step fails as a whole and applies nothing.
 4. Recreate the runtime role if it does not exist, and apply grants: `psql … -c "$(sed 's/{{APP_ROLE}}/tt_app/g' scripts/grants.sql)"`.
 5. `DATABASE_URL='<runtime string for the restored db>' pnpm verify:database` — must print `DATABASE CHECK PASSED`.
 6. `pnpm verify:attachments` against the restored database and the live Blob store; investigate every `missing_object` finding.
 7. Point a staging deployment at it, run `pnpm smoke`, sign in, open a few tasks.
 8. Switch production: update **`DATABASE_URL` only** (the *runtime* role of the restored database, pooled) in Vercel and redeploy. Do **not** put `DATABASE_URL_UNPOOLED` or any owner/`BYPASSRLS` connection string on Vercel: the running application must never hold it (keep it on the machine where you run migrations and backups). Run `pnpm smoke` again.
 9. Sessions in the dump are still valid for their original expiry. To force everyone to sign in again, revoke them in the database (`delete from auth_sessions;`) rather than rotating `BETTER_AUTH_SECRET`, which would also break every two-factor enrolment (see ENVIRONMENT.md).
-10. Record what happened (time of backup, time restored, data-loss window) for the post-incident review.
+10. **Check Settings → General: the registration switch.** A restore from before an administrator closed registration (or from before the switch existed) brings it back to *open*. Close it again if it was closed.
+11. Record what happened (time of backup, time restored, data-loss window) for the post-incident review.
 
-**Point-in-time restore on Neon** (if your plan offers it) follows the provider’s procedure (branch from a timestamp); steps 4–9 still apply to the new branch.
+**Point-in-time restore on Neon** (if your plan offers it) follows the provider’s procedure (branch from a timestamp); steps 3b–10 still apply to the new branch.
 
 ### Partial recovery (one organization or one task)
 
 * **One task or a few:** soft-deleted tasks are restorable in-app by anyone with `task.delete` for **30 days** before the retention job removes them permanently.
-* **One organization:** use the per-organization tool in [§6](#6-one-organization-export-import-and-partial-restore) — restore the full backup into a **scratch** database (steps 1–5), export the organization there, then import it into the live database.
+* **One organization:** use the per-organization tool in [§6](#6-one-organization-export-import-and-partial-restore) — restore the full backup into a **scratch** database (steps 1–5, including 3b if the dump is older than the application; the import refuses a bundle from a different schema), export the organization there, then import it into the live database.
 * **After any restore, re-run erasures** that happened after the backup was taken (people who asked to be erased are otherwise back with their personal data): list them in the live database *before* restoring (`select id, email from users where deleted_at is not null`) and erase those accounts again in the restored one with `pnpm privacy erase`. See [RETENTION.md](RETENTION.md#account-erasure).
 
 ## 4. The restore drill (automated, local)
@@ -105,11 +107,11 @@ Never restore over production first. Restore into a **new** database, verify, th
 3. compares source and restored databases: tables, columns, indexes, constraints, policies, row-level-security flags, functions, enums, extensions, **and for every table the row count and an order-independent MD5 of all columns**,
 4. creates a fresh least-privilege role on the restored copy, applies `scripts/grants.sql`, and proves through that role that each tenant sees exactly its own rows, that no tenant context sees nothing, that audit logs are still append-only, and that the retention function works.
 
-It refuses to restore into anything not named `*restore_check*`, never writes to the source, drops the scratch database afterwards, and writes `.data/backup/last-restore-test.json`.
+The default source is the two-organization E2E database; a one-organization database (the normal shape of an installation) is accepted too and the cross-tenant part is then reported as not applicable. It also proves that the restored copy still lets the runtime role change the registration switch of its own organization. It refuses to restore into anything not named `*restore_check*`, never writes to the source, drops the scratch database afterwards, and writes `.data/backup/last-restore-test.json`.
 
 ### Result recorded for this release
 
-Run on 2026-10-17 against the E2E database after a full 55-test browser run (13 migrations applied), PostgreSQL 16.15, local cluster:
+Run on 2026-10-17 against the E2E database after a full 55-test browser run (13 migrations applied), PostgreSQL 16.15, local cluster. (Re-run on 2026-10-19 with 15 migrations applied: 22/22 checks, including the two new ones above.)
 
 ```
 PASS  pg_dump produced a non-empty archive  (170472 bytes in 113 ms)

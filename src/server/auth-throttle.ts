@@ -23,7 +23,7 @@ export function accountRule(path: string, email: string | undefined, cookieHeade
 }
 
 /** The same test Better Auth's body parser uses to decide that a body is JSON. */
-const JSON_TYPE = /^application\/([a-z0-9.+-]*\+)?json/i;
+export const JSON_TYPE = /^application\/([a-z0-9.+-]*\+)?json/i;
 const EMAIL_PATHS = ["/sign-in/email", "/request-password-reset"];
 
 /** False when the request is one the per-account limits key on the e-mail address of, but not in a form they can read. */

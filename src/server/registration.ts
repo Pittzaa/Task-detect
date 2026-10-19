@@ -3,6 +3,8 @@ import type { Db } from "@/db/client";
 import { invitations, organizations } from "@/db/schema";
 import { withWorker, withWorkerOrg } from "@/jobs/context";
 import { AppError } from "@/lib/errors";
+import { displayNameSchema, imageSchema } from "@/lib/profile-fields";
+import { JSON_TYPE } from "./auth-throttle";
 import { consumeRateLimit } from "./rate-limit";
 
 export interface RegistrationState {
@@ -41,33 +43,41 @@ export async function canRegister(db: Db, email: string): Promise<boolean> {
   return false;
 }
 
-/** Sign-up attempts that may be made per hour, all callers together, while registration is closed (see refuseClosedSignUp). */
+/** Sign-up attempts that may be made per hour, all callers together, while registration is closed (see guardSignUp). */
 export const CLOSED_SIGNUP_PER_HOUR = 60;
 
+const refuse = (status: number, code: string, message: string, headers: Record<string, string> = {}) =>
+  Response.json({ message, code }, { status, headers: { "cache-control": "no-store", ...headers } });
+
 /**
- * In front of Better Auth's sign-up route: while registration is closed, an address without an invitation gets an honest 403
- * instead of the look-alike "check your e-mail" answer Better Auth gives when it quietly declines to create an account.
- * (The user-creation hook in auth.ts refuses too; this is what lets the person be told.)
- *
- * That honest answer also tells the caller whether an address has a pending invitation, so while closed every attempt, invited
- * or not, takes from one shared hourly allowance and gets 429 once it is used up. Nothing about the address is revealed to
- * a caller who is over the allowance, and the allowance does not depend on the caller's address (which a caller can forge).
+ * In front of Better Auth's sign-up route. Three things, in this order, each answering the same way whatever the address is:
+ *  1. The body must be JSON. Better Auth also reads form bodies, which would walk round everything below.
+ *  2. Name and image are judged here (the creation hook in auth.ts still does too). Better Auth only reaches that hook for an
+ *     address that has no account yet, so judging inside it would tell a caller which addresses are registered.
+ *  3. While registration is closed, an address without an invitation gets an honest 403 instead of the look-alike "check your
+ *     e-mail" answer Better Auth gives when it quietly declines to create an account. That answer would also tell the caller
+ *     whether an address has a pending invitation, so every attempt while closed, invited or not, takes from one shared hourly
+ *     allowance and gets 429 once it is used up. Nothing about the address is revealed to a caller who is over the allowance,
+ *     and the allowance does not depend on the caller's address (which a caller can forge).
  */
-export async function refuseClosedSignUp(req: Request, db: Db): Promise<Response | null> {
+export async function guardSignUp(req: Request, db: Db): Promise<Response | null> {
   if (req.method !== "POST" || !new URL(req.url).pathname.endsWith("/sign-up/email")) return null;
-  const body = (await req.clone().json().catch(() => null)) as { email?: unknown } | null;
-  if (typeof body?.email !== "string") return null;
+  if (!JSON_TYPE.test((req.headers.get("content-type") ?? "").trim())) {
+    return refuse(415, "UNSUPPORTED_MEDIA_TYPE", "Send this request as application/json.");
+  }
+  const body = (await req.clone().json().catch(() => null)) as { email?: unknown; name?: unknown; image?: unknown } | null;
+  if (typeof body?.email !== "string") return null; // Better Auth says what is wrong with it
+  if (!displayNameSchema.safeParse(body.name).success) return refuse(400, "INVALID_NAME", "Name must be 1-100 characters without control characters");
+  if (body.image !== undefined && body.image !== null && !imageSchema.safeParse(body.image).success) return refuse(400, "INVALID_IMAGE", "Image address is too long");
   if ((await registrationState(db)).open) return null;
   try {
     await consumeRateLimit(db, "signup:closed", 3600, CLOSED_SIGNUP_PER_HOUR);
   } catch (e) {
-    if (e instanceof AppError && e.code === "RATE_LIMITED") {
-      return Response.json({ message: "Too many requests. Please try again later.", code: "RATE_LIMITED" }, { status: 429, headers: { "cache-control": "no-store", "retry-after": "3600" } });
-    }
+    if (e instanceof AppError && e.code === "RATE_LIMITED") return refuse(429, "RATE_LIMITED", "Too many requests. Please try again later.", { "retry-after": "3600" });
     throw e;
   }
   if (await canRegister(db, body.email)) return null;
-  return Response.json({ message: "Registration is closed", code: "REGISTRATION_CLOSED" }, { status: 403, headers: { "cache-control": "no-store" } });
+  return refuse(403, "REGISTRATION_CLOSED", "Registration is closed");
 }
 
 /** The organization a person without a code is asking to join: only well defined while exactly one organization exists. */

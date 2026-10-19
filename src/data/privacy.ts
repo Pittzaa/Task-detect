@@ -78,7 +78,9 @@ async function exportOrg(db: Db, userId: string, orgId: string): Promise<OrgExpo
       eq(tasks.primaryAssigneeId, userId),
       sql`exists (select 1 from task_assignees a where a.task_id = ${tasks.id} and a.org_id = ${tasks.orgId} and a.user_id = ${userId})`,
     )!;
-    const canRead = readable === "all" ? undefined : inArray(tasks.projectId, readable.length ? readable : ["00000000-0000-0000-0000-000000000000"]);
+    // A deleted project is readable by nobody, an administrator included, so its work is left out for everyone alike.
+    const inLiveProject = sql`exists (select 1 from projects pr where pr.org_id = ${tasks.orgId} and pr.id = ${tasks.projectId} and pr.deleted_at is null)`;
+    const canRead = readable === "all" ? inLiveProject : and(inArray(tasks.projectId, readable.length ? readable : ["00000000-0000-0000-0000-000000000000"]), inLiveProject);
     const allInvolved = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.orgId, orgId), involved));
     const taskRows = await tx
       .select({

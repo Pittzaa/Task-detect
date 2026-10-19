@@ -327,7 +327,7 @@ export async function assignRole(s: TenantSession, input: { membershipId: string
   await assertCanGrantRole(s, input.roleId, input.scope);
   if (input.scope.type !== "organization") {
     const table = { department: departments, team: teams, project: projects }[input.scope.type];
-    const [exists] = await s.tx.select({ id: table.id }).from(table).where(and(eq(table.orgId, s.orgId), eq(table.id, input.scope.id), isNull(table.deletedAt)));
+    const [exists] = await s.tx.select({ id: table.id }).from(table).where(and(eq(table.orgId, s.orgId), eq(table.id, input.scope.id), isNull(table.deletedAt))).for("share");
     if (!exists) throw notFound();
   }
   const sc = input.scope;

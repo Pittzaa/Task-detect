@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { PERMISSIONS } from "@/authz/permissions";
 import { api } from "@/ui/api";
-import { Btn, Empty, ErrorNote, Field, Loading, Notice, TableWrap, Tabs, useToast } from "@/ui/components";
+import { Btn, Empty, ErrorNote, Field, Loading, Notice, TableWrap, Tabs, useToast, useTypedConfirm } from "@/ui/components";
 import { useQuery } from "@/ui/hooks";
 import { useI18n } from "@/ui/i18n";
 import { useOrg } from "@/ui/org";
@@ -15,6 +15,7 @@ export default function MembersPage() {
   const { orgId, can } = useOrg();
   const { t, err, date, locale } = useI18n();
   const toast = useToast();
+  const confirmDelete = useTypedConfirm();
   const [tab, setTab] = useState<"members" | "invites" | "roles">("members");
   const members = useQuery<{ members: Member[] }>(`members:${orgId}`, () => api(`/api/orgs/${orgId}/members?limit=100`), { refreshMs: 30_000 });
   const roles = useQuery<{ roles: Role[] }>(can.manageRoles || can.approveMembers ? `roles:${orgId}` : null, () => api(`/api/orgs/${orgId}/roles`));
@@ -33,6 +34,7 @@ export default function MembersPage() {
 
   return (
     <div className="stack">
+      {confirmDelete.dialog}
       <h1>{t("ui.members")}</h1>
       <Tabs label={t("ui.members")} value={tab} onChange={setTab} tabs={[{ id: "members", label: t("ui.members") }, { id: "invites", label: t("ui.invitations") }, { id: "roles", label: t("ui.roles") }]} />
       {tab === "members" && (
@@ -67,7 +69,7 @@ export default function MembersPage() {
                     <td className="row">
                       {m.status === "approved" && <Btn small onClick={() => void run(() => api(`/api/orgs/${orgId}/members/${m.id}/status`, { method: "POST", body: { status: "suspended" } }))}>{t("ui.status_suspend")}</Btn>}
                       {m.status === "suspended" && <Btn small onClick={() => void run(() => api(`/api/orgs/${orgId}/members/${m.id}/status`, { method: "POST", body: { status: "approved" } }))}>{t("ui.status_reactivate")}</Btn>}
-                      {m.status !== "revoked" && <Btn small kind="danger" onClick={() => { if (window.confirm(t("ui.confirm_revoke"))) void run(() => api(`/api/orgs/${orgId}/members/${m.id}/status`, { method: "POST", body: { status: "revoked" } })); }}>{t("ui.status_revoke")}</Btn>}
+                      {m.status !== "revoked" && <Btn small kind="danger" aria-label={`${t("ui.status_revoke")}: ${m.email}`} onClick={() => confirmDelete.ask({ phrase: m.email, body: t("ui.confirm_revoke"), run: async () => { await api(`/api/orgs/${orgId}/members/${m.id}/status`, { method: "POST", body: { status: "revoked" } }); members.reload(); invites.reload(); roles.reload(); } })}>{t("ui.status_revoke")}</Btn>}
                       {can.manageRoles && m.status === "approved" && <AssignRole orgId={orgId} member={m} roles={roles.data?.roles ?? []} onDone={() => members.reload()} />}
                     </td>
                   </tr>
@@ -93,7 +95,7 @@ export default function MembersPage() {
           <TableWrap label={t("ui.invitations")}><table><tbody>
             {invites.data?.invitations.map((i) => (
               <tr key={i.id}><td>{i.email}</td><td className="muted">{i.acceptedAt ? t("ui.invite_accepted") : i.revokedAt ? t("ui.status_label_revoked") : date(i.expiresAt.slice(0, 10))}</td>
-                <td>{!i.acceptedAt && !i.revokedAt && <Btn small onClick={() => void run(() => api(`/api/orgs/${orgId}/invitations/${i.id}`, { method: "DELETE" }))}>{t("ui.revoke_invite")}</Btn>}</td></tr>
+                <td>{!i.acceptedAt && !i.revokedAt && <Btn small kind="danger" aria-label={`${t("ui.revoke_invite")}: ${i.email}`} onClick={() => confirmDelete.ask({ phrase: i.email, body: t("ui.confirm_revoke_invite"), run: async () => { await api(`/api/orgs/${orgId}/invitations/${i.id}`, { method: "DELETE" }); invites.reload(); } })}>{t("ui.revoke_invite")}</Btn>}</td></tr>
             ))}
           </tbody></table></TableWrap>
         </>
@@ -136,6 +138,7 @@ function AssignRole({ orgId, member, roles, onDone }: { orgId: string; member: M
 function RolesTab({ orgId, roles, canManage, onChanged }: { orgId: string; roles: Role[]; canManage: boolean; onChanged: () => void }) {
   const { t, err } = useI18n();
   const toast = useToast();
+  const confirmDelete = useTypedConfirm();
   const [key, setKey] = useState("");
   const [name, setName] = useState("");
   const [perms, setPerms] = useState<string[]>([]);
@@ -158,9 +161,10 @@ function RolesTab({ orgId, roles, canManage, onChanged }: { orgId: string; roles
         <section key={r.id} className="card">
           <h3>{r.isSystem ? r.key : r.name} {r.isSystem && <span className="badge" data-p="low">system</span>}</h3>
           <p className="small muted">{r.permissions.join(", ") || "—"}</p>
-          {!r.isSystem && canManage && <Btn small kind="danger" onClick={async () => { if (!window.confirm(t("ui.confirm_irreversible"))) return; try { await api(`/api/orgs/${orgId}/roles/${r.id}`, { method: "DELETE" }); onChanged(); } catch (e) { toast(err(e), "error"); } }}>{t("ui.delete")}</Btn>}
+          {!r.isSystem && canManage && <Btn small kind="danger" aria-label={`${t("ui.delete")}: ${r.name}`} onClick={() => confirmDelete.ask({ phrase: r.name, body: t("ui.confirm_irreversible"), run: async () => { await api(`/api/orgs/${orgId}/roles/${r.id}`, { method: "DELETE" }); onChanged(); } })}>{t("ui.delete")}</Btn>}
         </section>
       ))}
+      {confirmDelete.dialog}
       <Notice>{t("ui.permissions")}: {PERMISSIONS.length}</Notice>
     </div>
   );

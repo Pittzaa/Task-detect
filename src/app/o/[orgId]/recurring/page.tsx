@@ -3,7 +3,7 @@ import { useState } from "react";
 import { TASK_PRIORITIES, type TaskPriority } from "@/domain/workflow";
 import { addDays } from "@/domain/time";
 import { api } from "@/ui/api";
-import { Btn, Empty, ErrorNote, Field, Loading, Modal, Notice, TableWrap, useToast } from "@/ui/components";
+import { Btn, Empty, ErrorNote, Field, Loading, Modal, Notice, TableWrap, useToast, useTypedConfirm } from "@/ui/components";
 import { useQuery } from "@/ui/hooks";
 import { useI18n } from "@/ui/i18n";
 import { useOrg } from "@/ui/org";
@@ -28,6 +28,7 @@ export default function RecurringPage() {
   const { orgId } = useOrg();
   const { t, date } = useI18n();
   const toast = useToast();
+  const confirmDelete = useTypedConfirm();
   const weekday = useWeekdayNames();
   const [chosen, setChosen] = useState("");
   const [editing, setEditing] = useState<Series | "new">();
@@ -43,9 +44,8 @@ export default function RecurringPage() {
   async function patch(s: Series, body: object) {
     try { await api(`/api/orgs/${orgId}/series/${s.id}`, { method: "PATCH", body }); list.reload(); } catch (e) { toast(e instanceof Error ? e.message : t("error.generic"), "error"); }
   }
-  async function remove(s: Series) {
-    if (!window.confirm(t("ui.confirm_delete_series"))) return;
-    try { await api(`/api/orgs/${orgId}/series/${s.id}`, { method: "DELETE" }); list.reload(); } catch (e) { toast(e instanceof Error ? e.message : t("error.generic"), "error"); }
+  function remove(s: Series) {
+    confirmDelete.ask({ phrase: s.title, body: t("ui.confirm_delete_series"), run: async () => { await api(`/api/orgs/${orgId}/series/${s.id}`, { method: "DELETE" }); list.reload(); } });
   }
 
   if (projects.loading && !projects.data) return <Loading />;
@@ -79,7 +79,7 @@ export default function RecurringPage() {
                     <div className="row" style={{ justifyContent: "flex-end" }}>
                       <Btn small onClick={() => void patch(s, { active: !s.active })}>{s.active ? t("ui.pause") : t("ui.resume")}</Btn>
                       <Btn small onClick={() => setEditing(s)} aria-label={`${t("ui.edit")}: ${s.title}`}>{t("ui.edit")}</Btn>
-                      <Btn small kind="danger" onClick={() => void remove(s)} aria-label={`${t("ui.delete")}: ${s.title}`}>{t("ui.delete")}</Btn>
+                      <Btn small kind="danger" onClick={() => remove(s)} aria-label={`${t("ui.delete")}: ${s.title}`}>{t("ui.delete")}</Btn>
                     </div>
                   </td>
                 </tr>
@@ -88,6 +88,7 @@ export default function RecurringPage() {
           </table>
         </TableWrap>
       )}
+      {confirmDelete.dialog}
       {editing && <SeriesForm key={editing === "new" ? "new" : editing.id} series={editing === "new" ? undefined : editing} projectId={projectId} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); list.reload(); }} />}
     </div>
   );

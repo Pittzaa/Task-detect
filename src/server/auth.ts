@@ -11,6 +11,7 @@ import { DEFAULT_LOCALE, isLocale, t, type Locale } from "@/i18n";
 import { describeError } from "@/lib/error-report";
 import { logger } from "@/lib/logger";
 import { auditAuthEvent } from "@/data/account";
+import { NAME_FORBIDDEN, displayNameSchema, imageSchema } from "@/lib/profile-fields";
 import { canRegister } from "./registration";
 
 export interface AuthDeps {
@@ -33,10 +34,7 @@ export const timeZoneSchema = z.string().refine((tz) => {
   }
 }, "invalid time zone");
 
-/** Control, bidi and line-separator characters have no place in a name that is shown in lists and put into e-mails and chat messages. */
-const NAME_FORBIDDEN = new RegExp("[\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]");
-export const displayNameSchema = z.string().trim().min(1).max(100).refine((v) => !NAME_FORBIDDEN.test(v), "invalid characters");
-const imageSchema = z.string().max(2048);
+export { displayNameSchema, imageSchema };
 
 /** Better Auth writes `name` and `image` as it receives them; this is the one place that bounds them, for sign-up and update-user alike. */
 function checkProfile<T extends { name?: unknown; image?: unknown }>(user: T, partial: boolean): T {
@@ -67,6 +65,9 @@ export function createAuth(deps: AuthDeps) {
     baseURL: deps.baseURL,
     secret: deps.secret,
     trustedOrigins: [deps.baseURL],
+    // Failures that end in a redirect (Google refusing to create an account while registration is closed, an expired link) land on
+    // our own sign-in page, which says what happened in the person's language, instead of Better Auth's unbranded English page.
+    onAPIError: { errorURL: `${deps.baseURL}/login` },
     database: drizzleAdapter(db as never, {
       provider: "pg",
       schema: {

@@ -317,6 +317,19 @@ describe("replace (partial restore in the same database)", () => {
     expect(normalize(await exportOrganization(src, X.org.slug))).toEqual(normalize(otherBefore));
   });
 
+  it("keeps the registration switch as it is now: restoring an older bundle never re-opens a closed registration", async () => {
+    await src.query("update organizations set registration_open = true where id = $1", [O.org.id]);
+    const older = await exportOrganization(src, O.org.slug); // taken while registration was open
+    await src.query("update organizations set registration_open = false where id = $1", [O.org.id]);
+    await importOrganization(src, older, { replace: true, apply: true });
+    expect((await src.query("select registration_open as open from organizations where id = $1", [O.org.id])).rows[0].open).toBe(false);
+    // and the other direction: open now, bundle taken while closed
+    const closed = await exportOrganization(src, O.org.slug);
+    await src.query("update organizations set registration_open = true where id = $1", [O.org.id]);
+    await importOrganization(src, closed, { replace: true, apply: true });
+    expect((await src.query("select registration_open as open from organizations where id = $1", [O.org.id])).rows[0].open).toBe(true);
+  });
+
   it("is all-or-nothing: a bundle that fails half way leaves the organization exactly as it was", async () => {
     const good = await exportOrganization(src, O.org.slug);
     const snapshot = normalize(good);

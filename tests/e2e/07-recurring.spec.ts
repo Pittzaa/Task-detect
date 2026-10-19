@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { alerts, login, state, preferEnglish } from "./helpers";
+import { alerts, cancelDeletion, confirmDeletion, login, state, preferEnglish } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 test.beforeEach(async ({ page }) => { await preferEnglish(page); });
@@ -69,11 +69,11 @@ test("a person without the permission neither sees the page link nor can create 
 test("deleting a series removes its open future occurrences after confirmation", async ({ page }) => {
   await login(page, "admin@e2e.test");
   await page.goto(`/o/${acme()}/recurring`);
-  page.once("dialog", (d) => void d.dismiss());
   await page.getByRole("row", { name: /Weekly status report v2/ }).getByRole("button", { name: /Delete: Weekly status report v2/ }).click();
+  await cancelDeletion(page);
   await expect(page.getByRole("row", { name: /Weekly status report v2/ })).toBeVisible(); // cancelled: still there
-  page.once("dialog", (d) => void d.accept());
   await page.getByRole("row", { name: /Weekly status report v2/ }).getByRole("button", { name: /Delete: Weekly status report v2/ }).click();
+  await confirmDeletion(page, "Weekly status report v2");
   await expect(page.getByRole("row", { name: /Weekly status report v2/ })).toHaveCount(0);
   await expect(alerts(page)).toHaveCount(0);
 

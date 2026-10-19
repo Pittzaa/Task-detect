@@ -38,10 +38,10 @@ export async function createDestination(s: TenantSession, deps: SecretDeps, inpu
   if (!eventsOk(input.events)) throw validation("Choose at least one valid event");
   const { hint } = parseUrl(input.webhookUrl);
   if (input.teamId) {
-    const [t] = await s.tx.select({ id: teams.id }).from(teams).where(and(eq(teams.orgId, s.orgId), eq(teams.id, input.teamId), isNull(teams.deletedAt)));
+    const [t] = await s.tx.select({ id: teams.id }).from(teams).where(and(eq(teams.orgId, s.orgId), eq(teams.id, input.teamId), isNull(teams.deletedAt))).for("share");
     if (!t) throw notFound();
   } else {
-    const [p] = await s.tx.select({ id: projects.id }).from(projects).where(and(eq(projects.orgId, s.orgId), eq(projects.id, input.projectId!), isNull(projects.deletedAt)));
+    const [p] = await s.tx.select({ id: projects.id }).from(projects).where(and(eq(projects.orgId, s.orgId), eq(projects.id, input.projectId!), isNull(projects.deletedAt))).for("share");
     if (!p) throw notFound();
   }
   const id = randomUUID();

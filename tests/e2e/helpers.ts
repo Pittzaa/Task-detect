@@ -76,3 +76,36 @@ export async function totpFromUri(uri: string): Promise<string> {
 
 /** App alerts only: Next.js adds its own empty role="alert" route announcer to every page. */
 export const alerts = (page: Page) => page.locator('[role="alert"]:not(#__next-route-announcer__)');
+
+/**
+ * Answers the "type the name to confirm" dialog that every deletion of something that matters opens: the button stays disabled
+ * for a wrong or partial name, Enter does not get round that, and it is enabled by the exact name.
+ */
+export async function confirmDeletion(page: Page, phrase: string) {
+  const dialog = page.getByRole("dialog", { name: /^Confirm (deletion|archiving)$/ });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText(phrase, { exact: true })).toBeVisible(); // the name to type is shown, so it can be copied
+  const button = dialog.getByRole("button", { name: /^(Delete permanently|Archive)$/ });
+  const field = dialog.getByLabel("Type the name to confirm");
+  await expect(button).toBeDisabled();
+  await field.fill(phrase.slice(0, -1) || "x");
+  await expect(button).toBeDisabled();
+  await field.press("Enter"); // submitting the form with a wrong name must do nothing
+  await expect(dialog).toBeVisible();
+  await field.fill("");
+  await field.pressSequentially(phrase); // real keystrokes: focus must stay in the field while the page re-renders on each one
+  await expect(field).toBeFocused();
+  await expect(field).toHaveValue(phrase);
+  await expect(button).toBeEnabled();
+  await button.click();
+  await expect(dialog).toBeHidden();
+}
+
+/** Opens the same dialog and leaves it without deleting: through Cancel, or Escape. */
+export async function cancelDeletion(page: Page, how: "cancel" | "escape" = "cancel") {
+  const dialog = page.getByRole("dialog", { name: /^Confirm (deletion|archiving)$/ });
+  await expect(dialog).toBeVisible();
+  if (how === "cancel") await dialog.getByRole("button", { name: "Cancel" }).click();
+  else await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+}

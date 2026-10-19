@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import pg from "pg";
-import { login, preferEnglish, register, state } from "./helpers";
+import { cancelDeletion, confirmDeletion, expectAccessible, login, preferEnglish, register, state } from "./helpers";
 
 /**
  * One installation is one organization; its administrators decide whether new people may sign up, and they may delete
@@ -129,35 +129,43 @@ test.describe("deleting structure", () => {
     const teamButton = teams.getByRole("button", { name: "Delete: Doomed team", exact: true });
     await expect(teamButton).toBeVisible();
 
-    // cancelling the confirmation deletes nothing
-    page.once("dialog", (d) => { void d.dismiss(); });
+    // a click alone deletes nothing: the dialog asks for the name, and leaving it (Cancel or Escape) deletes nothing either
     await teamButton.click();
+    await expect(page.getByRole("dialog", { name: "Confirm deletion" }).getByText("People who only had a role in this team")).toBeVisible();
+    await cancelDeletion(page);
+    await teamButton.click();
+    await cancelDeletion(page, "escape");
     await expect(teamButton).toBeVisible();
 
+    // a wrong name typed into the dialog: the button stays disabled; and the server refuses a request that does not carry the name
+    const noName = await page.request.delete(`/api/orgs/${acme()}/teams/${team.id}`, { headers: { origin: ORIGIN } });
+    expect(noName.status()).toBe(422);
+    const wrongName = await page.request.delete(`/api/orgs/${acme()}/teams/${team.id}`, { data: { confirm: "doomed team" }, headers: { origin: ORIGIN } });
+    expect(wrongName.status()).toBe(422);
+    expect(await wrongName.json()).toMatchObject({ error: { code: "VALIDATION", message: "val.confirm_mismatch" } });
+
     // a team
-    let asked = "";
-    page.once("dialog", (d) => { asked = d.message(); void d.accept(); });
     await teamButton.click();
+    await confirmDeletion(page, "Doomed team");
     await expect(teamButton).toHaveCount(0);
-    expect(asked).toContain("Doomed team");
     expect((await page.request.get(`/api/orgs/${acme()}/teams`).then((r) => r.json()) as { teams: { id: string }[] }).teams.map((t) => t.id)).not.toContain(team.id);
 
     // a department takes the rest of its teams with it
     const depts = region(page, "Departments");
-    page.once("dialog", (d) => { asked = d.message(); void d.accept(); });
     await depts.getByRole("button", { name: "Delete: Doomed department" }).click();
+    await expect(page.getByRole("dialog", { name: "Confirm deletion" }).getByText("1 team")).toBeVisible();
+    await confirmDeletion(page, "Doomed department");
     await expect(depts.getByRole("button", { name: "Delete: Doomed department" })).toHaveCount(0);
-    expect(asked).toContain("1 team");
     await expect(teams.getByRole("button", { name: "Delete: Doomed team two" })).toHaveCount(0);
     const live = await page.request.get(`/api/orgs/${acme()}/teams`).then((r) => r.json()) as { teams: { id: string }[] };
     expect(live.teams.map((t) => t.id)).not.toContain(team2.id);
 
     // a project, with its tasks
     const projects = region(page, "Projects");
-    page.once("dialog", (d) => { asked = d.message(); void d.accept(); });
     await projects.getByRole("button", { name: "Delete: Doomed project" }).click();
+    await expect(page.getByRole("dialog", { name: "Confirm deletion" }).getByText("ALL of its tasks")).toBeVisible();
+    await confirmDeletion(page, "Doomed project");
     await expect(projects.getByRole("button", { name: "Delete: Doomed project" })).toHaveCount(0);
-    expect(asked).toContain("ALL of its tasks");
     expect((await page.request.get(`/api/orgs/${acme()}/projects/${project.id}`)).status()).toBe(404);
     expect((await page.request.get(`/api/orgs/${acme()}/tasks/${task.id}`)).status()).toBe(404);
     // the rest is untouched
@@ -181,9 +189,101 @@ test.describe("deleting structure", () => {
     await expect(page.getByRole("button", { name: /^Delete/ })).toHaveCount(0);
     const some = await page.request.get(`/api/orgs/${acme()}/projects`).then((r) => r.json()) as { projects: { id: string }[] };
     expect(some.projects.length).toBeGreaterThan(0);
-    const res = await page.request.delete(`/api/orgs/${acme()}/projects/${some.projects[0]!.id}`, { headers: { origin: ORIGIN } });
+    const res = await page.request.delete(`/api/orgs/${acme()}/projects/${some.projects[0]!.id}`, { data: { confirm: "Website" }, headers: { origin: ORIGIN } }); // even with the right name
     expect([403, 404]).toContain(res.status());
     const still = await page.request.get(`/api/orgs/${acme()}/projects/${some.projects[0]!.id}`);
     expect(still.status()).toBe(200);
   });
 });
+
+test.describe("the other deletions ask for the name too", () => {
+  test("an attachment goes only after its file name is typed", async ({ page }) => {
+    await login(page, "admin@e2e.test");
+    const projects = await page.request.get(`/api/orgs/${acme()}/projects`).then((r) => r.json()) as { projects: { id: string; name: string }[] };
+    const task = await (await post(page, `/api/orgs/${acme()}/tasks`, { projectId: projects.projects.find((p) => p.name === "Website")!.id, title: "Has a contract" })).json() as { id: string };
+    await page.goto(`/o/${acme()}/tasks?task=${task.id}`);
+    const drawer = page.getByRole("dialog").first();
+    await drawer.getByLabel("Upload file").setInputFiles({ name: "contract.txt", mimeType: "text/plain", buffer: Buffer.from("not really a contract") });
+    await expect(drawer.getByRole("link", { name: "contract.txt" })).toBeVisible();
+    await drawer.getByRole("button", { name: "Delete: contract.txt" }).click();
+    await cancelDeletion(page, "escape"); // Escape closes only the confirmation, not the task behind it
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole("link", { name: "contract.txt" })).toBeVisible();
+    await drawer.getByRole("button", { name: "Delete: contract.txt" }).click();
+    await confirmDeletion(page, "contract.txt");
+    await expect(drawer.getByRole("link", { name: "contract.txt" })).toHaveCount(0);
+  });
+
+  test("an invitation is cancelled only after its address is typed", async ({ page }) => {
+    await login(page, "admin@e2e.test");
+    const roles = (await (await page.request.get(`/api/orgs/${acme()}/roles`)).json()) as { roles: { id: string; key: string }[] };
+    await post(page, `/api/orgs/${acme()}/invitations`, { email: "cancelme@e2e.test", roleId: roles.roles.find((r) => r.key === "viewer")!.id });
+    await page.goto(`/o/${acme()}/members`);
+    await page.getByRole("tab", { name: "Invitations" }).click();
+    const row = page.getByRole("row", { name: /cancelme@e2e\.test/ });
+    await row.getByRole("button", { name: /Cancel invitation/ }).click();
+    await cancelDeletion(page);
+    await expect(row.getByRole("button", { name: /Cancel invitation/ })).toBeVisible();
+    await row.getByRole("button", { name: /Cancel invitation/ }).click();
+    await confirmDeletion(page, "cancelme@e2e.test");
+    await expect(row.getByRole("button", { name: /Cancel invitation/ })).toHaveCount(0);
+  });
+
+  test("a custom role and a custom field are removed only after their names are typed", async ({ page }) => {
+    await login(page, "admin@e2e.test");
+    await post(page, `/api/orgs/${acme()}/roles`, { key: "temp_role", name: "Temporary role", permissions: ["org.read"] });
+    await page.goto(`/o/${acme()}/members`);
+    await page.getByRole("tab", { name: "Roles" }).click();
+    await page.getByRole("button", { name: "Delete: Temporary role" }).click();
+    await cancelDeletion(page);
+    await page.getByRole("button", { name: "Delete: Temporary role" }).click();
+    await confirmDeletion(page, "Temporary role");
+    await expect(page.getByRole("button", { name: "Delete: Temporary role" })).toHaveCount(0);
+
+    await post(page, `/api/orgs/${acme()}/custom-fields`, { name: "Temporary field", type: "text" });
+    await page.goto(`/o/${acme()}/settings`);
+    await page.getByRole("tab", { name: "Custom fields" }).click();
+    await page.getByRole("button", { name: "Archive: Temporary field" }).click();
+    await cancelDeletion(page);
+    await page.getByRole("button", { name: "Archive: Temporary field" }).click();
+    await confirmDeletion(page, "Temporary field");
+    await expect(page.getByRole("button", { name: "Archive: Temporary field" })).toHaveCount(0);
+  });
+});
+
+test.describe("sign-in page after a redirect", () => {
+  test("says in our own words that sign-ups are closed, or that sign-in failed, and never shows the text it was given", async ({ page }) => {
+    await page.goto("/login?error=REGISTRATION_CLOSED");
+    await expect(page.locator(".notice.error")).toContainText("New sign-ups are closed at the moment");
+    await page.goto("/login?error=unable_to_create_user&error_description=%3Cimg%20src%3Dx%3E%20SECRET");
+    await expect(page.locator(".notice.error")).toContainText("Could not sign you in");
+    expect(await page.locator("body").innerText()).not.toContain("SECRET"); // the page never shows it (Next only carries the query string in its own, escaped, page data)
+    expect(await page.locator("img[src=x]").count()).toBe(0); // and it is never turned into markup
+    await page.goto("/login");
+    await expect(page.locator(".notice")).toHaveCount(0);
+  });
+});
+
+test.describe("the confirmation dialog itself", () => {
+  test("passes axe, in both themes, and fits a phone with a very long name", async ({ page }) => {
+    await login(page, "admin@e2e.test");
+    const long = `Long name ${"x".repeat(80)}`;
+    const dept = await (await post(page, `/api/orgs/${acme()}/departments`, { name: long })).json() as { id: string };
+    await page.goto(`/o/${acme()}/structure`);
+    await region(page, "Departments").getByRole("button", { name: `Delete: ${long}` }).click();
+    await expect(page.getByRole("dialog", { name: "Confirm deletion" })).toBeVisible();
+    await expectAccessible(page, "typed confirmation (light)");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expectAccessible(page, "typed confirmation (dark)");
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.setViewportSize({ width: 375, height: 667 });
+    const box = (await page.getByRole("dialog", { name: "Confirm deletion" }).boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(375);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await confirmDeletion(page, long);
+    await expect(region(page, "Departments").getByRole("button", { name: `Delete: ${long}` })).toHaveCount(0);
+    expect((await page.request.get(`/api/orgs/${acme()}/departments`).then((r) => r.json()) as { departments: { id: string }[] }).departments.map((d) => d.id)).not.toContain(dept.id);
+  });
+});
+

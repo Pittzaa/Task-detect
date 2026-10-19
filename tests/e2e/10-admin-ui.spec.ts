@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { alerts, linkIn, login, mails, preferEnglish, register, state, waitMail } from "./helpers";
+import { alerts, cancelDeletion, confirmDeletion, linkIn, login, mails, preferEnglish, register, state, waitMail } from "./helpers";
 
 /**
  * The administration screens, driven the way an administrator would use them: invitations, custom roles with scoped
@@ -107,11 +107,12 @@ test("member lifecycle: suspend, reactivate, and a revoke that asks first", asyn
   await ivyRow().getByRole("button", { name: "Reactivate" }).click();
   await expect(ivyRow()).toContainText("Approved");
 
-  page.once("dialog", (d) => { expect(d.message()).toContain("invited again"); void d.dismiss(); });
   await ivyRow().getByRole("button", { name: "Revoke" }).click();
-  await expect(ivyRow()).toContainText("Approved"); // dismissed: nothing happened
-  page.once("dialog", (d) => void d.accept());
+  await expect(page.getByRole("dialog", { name: "Confirm deletion" })).toContainText("invited again");
+  await cancelDeletion(page);
+  await expect(ivyRow()).toContainText("Approved"); // cancelled: nothing happened
   await ivyRow().getByRole("button", { name: "Revoke" }).click();
+  await confirmDeletion(page, "ivy@e2e.test"); // the person's address has to be typed
   await expect(ivyRow()).toContainText("Revoked");
   await expect(ivyRow().getByRole("button", { name: "Reactivate" })).toHaveCount(0);
 });
@@ -221,11 +222,11 @@ test("Discord destinations: the webhook secret is never shown again, can be disa
   await expect(alerts(page).first()).toBeVisible();
   await expect(section.getByText("Evil")).toHaveCount(0);
 
-  page.once("dialog", (d) => void d.dismiss());
   await dev.getByRole("button", { name: "Delete" }).click();
+  await cancelDeletion(page, "escape");
   await expect(section.getByText("Dev channel")).toBeVisible();
-  page.once("dialog", (d) => void d.accept());
   await dev.getByRole("button", { name: "Delete" }).click();
+  await confirmDeletion(page, "Dev channel");
   await expect(section.getByText("Dev channel")).toHaveCount(0);
 });
 

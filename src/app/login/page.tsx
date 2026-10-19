@@ -17,7 +17,13 @@ function LoginForm() {
   const [code, setCode] = useState("");
   const [needsCode, setNeedsCode] = useState(false);
   const [useBackup, setUseBackup] = useState(false);
-  const [message, setMessage] = useState<{ kind: "error" | "success" | "warn"; text: string } | undefined>(() => (params.get("verified") ? { kind: "success", text: t("ui.password_changed") } : params.get("erased") ? { kind: "success", text: t("ui.erased_ok") } : undefined));
+  // `error` comes back from a redirect (Better Auth appends it); only its kind is used, the text itself is never shown
+  const redirected = params.get("error");
+  const [message, setMessage] = useState<{ kind: "error" | "success" | "warn"; text: string } | undefined>(() => (
+    params.get("verified") ? { kind: "success", text: t("ui.password_changed") }
+    : params.get("erased") ? { kind: "success", text: t("ui.erased_ok") }
+    : redirected ? { kind: "error", text: /registration_closed/i.test(redirected) ? t("error.registration_closed") : t("ui.signin_failed_redirect") }
+    : undefined));
   const [busy, setBusy] = useState(false);
   const [google, setGoogle] = useState(false);
 
@@ -41,7 +47,7 @@ function LoginForm() {
   }
 
   async function withGoogle() {
-    const res = await authApi<{ url?: string }>("/sign-in/social", { provider: "google", callbackURL: safeNext(params.get("next")) });
+    const res = await authApi<{ url?: string }>("/sign-in/social", { provider: "google", callbackURL: safeNext(params.get("next")), errorCallbackURL: "/login" });
     if (res.url) window.location.href = res.url;
   }
 

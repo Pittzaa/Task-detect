@@ -374,9 +374,10 @@ sudo chown -R tasktracker:tasktracker /opt/task-tracker/app        # กัน�
 sudo -H -u tasktracker pnpm build
 sudo systemctl restart task-tracker
 curl -s -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:3000/login
+sudo -H -u tasktracker bash -c 'set -a; . /etc/task-tracker/env; set +a; cd /opt/task-tracker/app && pnpm -s verify:database'   # ต้องขึ้น DATABASE CHECK PASSED (ตรวจด้วยว่า grants ครบ)
 ```
 
-**ย้อนกลับ:** `git checkout <commit เดิม>` แล้ว `pnpm build` และ `systemctl restart` ใหม่ (ฐานข้อมูลไม่ต้องย้อน เพราะ migration เพิ่มอย่างเดียว) ถ้าเกิดหายนะ กู้จากไฟล์สำรอง
+**ย้อนกลับ:** `git checkout <commit เดิม>` แล้ว `pnpm build` และ `systemctl restart` ใหม่ (ฐานข้อมูลไม่ต้องย้อน เพราะ migration เพิ่มอย่างเดียว **แต่ build ที่เก่ากว่า migration 0014 ไม่รู้จักสวิตช์เปิด/ปิดสมัครสมาชิก จึงเปิดรับสมัครให้ทุกคนจนกว่าจะอัปเดตกลับ ตรวจที่ ตั้งค่า → ทั่วไป**) ถ้าเกิดหายนะ กู้จากไฟล์สำรอง
 
 ---
 
