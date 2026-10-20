@@ -12,7 +12,8 @@ describe("parseOrgName", () => {
     expect(ok("  Acme   Co  ")).toBe("Acme Co");
     expect(ok("Acme\nCo")).toBe("Acme Co"); // a line break cannot get through to an e-mail subject
     expect(ok("Acme\r\n\tCo")).toBe("Acme Co");
-    expect(ok("Café")).toBe("Café");
+    expect(ok("Cafe\u0301")).toBe("Caf\u00e9"); // e + combining accent becomes the single é
+    expect(ok("e\u0301".repeat(ORG_NAME_MAX))).toBe("\u00e9".repeat(ORG_NAME_MAX)); // the length is judged after that, so 80 of them fit
   });
 
   it("refuses an empty name: an organization is never without one", () => {

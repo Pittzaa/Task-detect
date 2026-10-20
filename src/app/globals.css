@@ -27,7 +27,7 @@ a { color: var(--primary); }
 /* shell */
 .shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 100vh; }
 .sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 1rem 0.75rem; display: flex; flex-direction: column; gap: 0.25rem; position: sticky; top: 0; height: 100vh; overflow: auto; }
-.brand { font-weight: 700; font-size: 1.1rem; padding: 0.25rem 0.75rem 0.75rem; }
+.brand { font-weight: 700; font-size: 1.1rem; padding: 0.25rem 0.75rem 0.75rem; overflow-wrap: anywhere; }
 .nav a { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.75rem; border-radius: 8px; color: var(--text); text-decoration: none; }
 .nav a:hover { background: var(--surface-2); }
 .nav a[aria-current="page"] { background: var(--primary-soft); color: var(--primary); font-weight: 600; }

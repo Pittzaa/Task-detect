@@ -110,7 +110,10 @@ describe("registration switch and the single organization", () => {
       await addMember(c.admin, O.org.id, au!.id, { role: "orgadmin" });
       const put = (body: unknown) => adminClient.route(settingsPUT as never, "PUT", `/api/orgs/${O.org.id}/settings`, body, { orgId: O.org.id });
       expect((await put({ registrationOpen: "yes" })).status).toBe(422);
-      expect((await put({ registrationOpen: false, name: "hijacked" })).status).toBe(422);
+      const row = async () => (await c.admin.select({ open: organizations.registrationOpen, slug: organizations.slug, name: organizations.name }).from(organizations).where(eq(organizations.id, O.org.id)))[0]!;
+      const before = await row();
+      expect((await put({ registrationOpen: false, slug: "hijacked" })).status).toBe(422); // an unknown key refuses the whole request
+      expect(await row()).toEqual(before);
       expect((await put({})).status).toBe(422);
       const ok = await put({ registrationOpen: false });
       expect(ok.status).toBe(200);

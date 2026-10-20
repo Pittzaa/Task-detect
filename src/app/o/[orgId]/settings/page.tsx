@@ -77,28 +77,31 @@ function OrgNameSettings() {
   const { t, err } = useI18n();
   const toast = useToast();
   const q = useQuery<{ name: string }>(`org-settings:${orgId}`, () => api(`/api/orgs/${orgId}/settings`));
-  const [draft, setDraft] = useState<string>();
+  // what was typed, and the name the server had when it was typed: once the server's name is a different one (the save came back, or somebody else
+  // renamed), the typed text no longer applies and the server's name is shown
+  const [draft, setDraft] = useState<{ value: string; base: string }>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   async function save() {
     setBusy(true); setError(undefined);
     try {
-      await api(`/api/orgs/${orgId}/settings`, { method: "PUT", body: { name: draft } });
-      setDraft(undefined); q.reload(); reload(); toast(t("ui.org_name_saved")); // the menu follows at once
+      const r = await api<{ name: string }>(`/api/orgs/${orgId}/settings`, { method: "PUT", body: { name: draft?.value } });
+      setDraft({ value: r.name, base: q.data!.name }); q.reload(); reload(); toast(t("ui.org_name_saved")); // the menu follows at once; the field keeps the saved name until the fresh answer arrives
     } catch (e) { setError(err(e)); } finally { setBusy(false); }
   }
   if (q.loading && !q.data) return <Loading />;
   if (q.error) return <ErrorNote error={q.error} onRetry={q.reload} />;
-  const shown = draft ?? q.data!.name;
+  const serverName = q.data!.name;
+  const shown = draft && draft.base === serverName ? draft.value : serverName;
   return (
     <section className="card stack" aria-labelledby="h-org-name">
       <h2 id="h-org-name">{t("ui.org_name_title")}</h2>
       <p className="muted">{t("ui.org_name_hint")}</p>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); void save(); }} noValidate>
         {error && <Notice kind="error">{error}</Notice>}
-        <Field label={t("ui.org_name_label")}>{(id) => <input id={id} value={shown} maxLength={80} autoComplete="off" onChange={(e) => setDraft(e.target.value)} />}</Field>
+        <Field label={t("ui.org_name_label")}>{(id) => <input id={id} value={shown} maxLength={80} autoComplete="off" onChange={(e) => setDraft({ value: e.target.value, base: serverName })} />}</Field>
         <div className="row">
-          <Btn type="submit" kind="primary" disabled={busy || draft === undefined || draft === q.data!.name}>{t("ui.org_name_save")}</Btn>
+          <Btn type="submit" kind="primary" disabled={busy || shown === serverName}>{t("ui.org_name_save")}</Btn>
         </div>
       </form>
     </section>
@@ -111,28 +114,29 @@ function AppNameSettings() {
   const { t, err, setAppName } = useI18n();
   const toast = useToast();
   const q = useQuery<{ appName: string; appNameIsDefault: boolean }>(`org-settings:${orgId}`, () => api(`/api/orgs/${orgId}/settings`));
-  const [draft, setDraft] = useState<string>();
+  const [draft, setDraft] = useState<{ value: string; base: string }>(); // as in OrgNameSettings
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   async function save(value: string | null) {
     setBusy(true); setError(undefined);
     try {
       const r = await api<{ appName: string }>(`/api/orgs/${orgId}/settings`, { method: "PUT", body: { appName: value } });
-      setAppName(r.appName); setDraft(undefined); q.reload(); toast(t("ui.app_name_saved"));
+      setAppName(r.appName); setDraft({ value: r.appName, base: q.data!.appName }); q.reload(); toast(t("ui.app_name_saved")); // the field keeps the saved name until the fresh answer arrives
     } catch (e) { setError(err(e)); } finally { setBusy(false); }
   }
   if (q.loading && !q.data) return <Loading />;
   if (q.error) return <ErrorNote error={q.error} onRetry={q.reload} />;
-  const shown = draft ?? q.data!.appName;
+  const serverAppName = q.data!.appName;
+  const shown = draft && draft.base === serverAppName ? draft.value : serverAppName;
   return (
     <section className="card stack" aria-labelledby="h-app-name">
       <h2 id="h-app-name">{t("ui.app_name_title")}</h2>
       <p className="muted">{t("ui.app_name_hint")}</p>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); void save(shown.trim() === "" ? null : shown); }} noValidate>
         {error && <Notice kind="error">{error}</Notice>}
-        <Field label={t("ui.app_name_label")}>{(id) => <input id={id} value={shown} maxLength={40} autoComplete="off" onChange={(e) => setDraft(e.target.value)} />}</Field>
+        <Field label={t("ui.app_name_label")}>{(id) => <input id={id} value={shown} maxLength={40} autoComplete="off" onChange={(e) => setDraft({ value: e.target.value, base: serverAppName })} />}</Field>
         <div className="row">
-          <Btn type="submit" kind="primary" disabled={busy || draft === undefined || draft === q.data!.appName}>{t("ui.app_name_save")}</Btn>
+          <Btn type="submit" kind="primary" disabled={busy || shown === serverAppName}>{t("ui.app_name_save")}</Btn>
           {!q.data!.appNameIsDefault && <Btn type="button" onClick={() => void save(null)} disabled={busy}>{t("ui.app_name_reset")}</Btn>}
         </div>
       </form>

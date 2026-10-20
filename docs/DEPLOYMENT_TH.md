@@ -132,7 +132,7 @@ psql '<OWNER_DIRECT>' -v ON_ERROR_STOP=1 -c "$(sed 's/{{APP_ROLE}}/tt_app/g' scr
 
 ไม่มี `psql` หรือใช้ Windows ล้วน ๆ: เปิดไฟล์ `scripts/grants.sql` แก้ `{{APP_ROLE}}` ทุกจุดเป็น `tt_app` แล้ววางทั้งไฟล์ใน SQL Editor ของ Neon รัน
 
-**กฎสำคัญ:** ทุกครั้งที่ปล่อยเวอร์ชันใหม่ที่มี migration ต้องรัน **migrate → grants → deploy** ตามลำดับนี้เสมอ (migration ไม่ได้ให้สิทธิ์กับ role ของแอปเอง)
+**กฎสำคัญ:** ทุกครั้งที่ปล่อยเวอร์ชันใหม่ที่มี migration หรือที่แก้ `scripts/grants.sql` (ตรวจด้วย `git diff <เวอร์ชันเดิม> -- scripts/grants.sql`) ต้องรัน **migrate → grants → deploy** ตามลำดับนี้เสมอ (migration ไม่ได้ให้สิทธิ์กับ role ของแอปเอง)
 
 ### 3.4 สร้างองค์กรแรกและผู้ดูแลคนแรก
 
@@ -323,8 +323,8 @@ DATABASE_URL='<DATABASE_URL ของ tt_app>' BLOB_READ_WRITE_TOKEN='<token>' p
 
 ## การปล่อยเวอร์ชันถัดไป
 
-1. อ่านว่าเวอร์ชันใหม่มี migration หรือไม่ (โฟลเดอร์ `drizzle/` ใหม่; ดู [MIGRATIONS.md](MIGRATIONS.md))
-2. ถ้ามี: `pnpm db:migrate` (owner) → รัน `grants.sql` ซ้ำ → รัน `pnpm verify:database` → **แล้วจึง** deploy migration เป็นแบบเพิ่มอย่างเดียวและเข้ากับเวอร์ชันก่อนหน้าได้ แอปเก่าจึงทำงานต่อได้ระหว่างสลับ และ `/api/health/ready` จะรายงานถ้า build ใหม่กว่าฐานข้อมูล
+1. อ่านว่าเวอร์ชันใหม่มี migration หรือไม่ (โฟลเดอร์ `drizzle/` ใหม่; ดู [MIGRATIONS.md](MIGRATIONS.md)) และ `scripts/grants.sql` เปลี่ยนหรือไม่ (`git diff <เวอร์ชันเดิม> -- scripts/grants.sql`)
+2. ถ้ามีอย่างใดอย่างหนึ่ง: `pnpm db:migrate` (owner; ข้ามได้ถ้าไม่มี migration) → รัน `grants.sql` ซ้ำ → รัน `pnpm verify:database` → **แล้วจึง** deploy migration เป็นแบบเพิ่มอย่างเดียวและเข้ากับเวอร์ชันก่อนหน้าได้ แอปเก่าจึงทำงานต่อได้ระหว่างสลับ และ `/api/health/ready` จะรายงานถ้า build ใหม่กว่าฐานข้อมูล
 3. deploy → รัน `pnpm smoke` อีกครั้ง
 
 **Rollback**: ใน Vercel ให้ promote deployment ก่อนหน้า (ทันที) **ข้อควรระวัง: build ที่เก่ากว่า migration 0014 ไม่รู้จักสวิตช์เปิด/ปิดสมัครสมาชิก จึงเปิดรับสมัครให้ทุกคนจนกว่าจะอัปเดตกลับ** (ตรวจที่ ตั้งค่า → ทั่วไป หลังย้อน) migration เป็นแบบไปข้างหน้าอย่างเดียว ถ้า migration มีปัญหาให้เขียน migration ใหม่แก้ ถ้าเสียหายหนักให้ restore จาก backup ([BACKUP_RESTORE.md](BACKUP_RESTORE.md)) หมุนกุญแจเข้ารหัส: ใช้ `APP_ENCRYPTION_KEY_PREVIOUS` กับ `pnpm rotate:key` ([SECURITY.md](SECURITY.md))
@@ -335,7 +335,7 @@ DATABASE_URL='<DATABASE_URL ของ tt_app>' BLOB_READ_WRITE_TOKEN='<token>' p
 |---|---|---|
 | ทุกหน้าตอบ 503 "Service unavailable" | role ในฐานข้อมูลของแอปข้าม RLS ได้ (เป็น superuser หรือมี `BYPASSRLS`) แอปจึงปฏิเสธให้บริการโดยตั้งใจ | ใช้ role `tt_app` ที่สร้างด้วย `NOSUPERUSER NOBYPASSRLS` ใน `DATABASE_URL` แล้วรัน `pnpm verify:database` |
 | คำขอล้มเหลวทั้งหมด / error เรื่องตัวแปร | ตัวแปรขาด หรือรูปแบบผิด (เช่น `APP_URL` ไม่ใช่ https, `SENTRY_DSN` ไม่ใช่ https) | log บอกชื่อตัวแปร แก้ใน Vercel แล้ว redeploy |
-| error `permission denied` ใน log / บางหน้า 500 | ยังไม่ได้รัน `grants.sql` หลัง migrate | รัน grants ซ้ำ (ขั้นที่ 3.3) |
+| error `permission denied` ใน log / บางหน้า 500 | ยังไม่ได้รัน `grants.sql` หลัง migrate หรือหลังเวอร์ชันที่แก้ `grants.sql` | รัน grants ซ้ำ (ขั้นที่ 3.3) |
 | `/api/health/ready` รายงาน `migrations` ไม่ผ่าน | build ใหม่กว่าฐานข้อมูล | `pnpm db:migrate` แล้วรัน grants |
 | `/api/health/ready` หรือ `/api/cron/tick` ได้ 401 | ไม่ส่ง หรือส่งค่า `CRON_SECRET` ไม่ตรง | ตรวจ header `Authorization: Bearer <ค่าเดียวกับใน Vercel>` |
 | กดบันทึก/ล็อกอินแล้วได้ 403 | `APP_URL` ไม่ตรงกับโดเมนที่ใช้เข้า (เช่น มี/ไม่มี `www.`) | แก้ `APP_URL` ให้ตรงเป๊ะ แล้ว redeploy |

@@ -217,8 +217,14 @@ describe("digests follow the switch", () => {
     expect(actions).toEqual(expect.arrayContaining(["org.auto_email_on", "org.auto_email_off"]));
   });
 
-  it("the runtime role may change this one setting of its own organization and nothing else on it", async () => {
-    await expect(c.app.execute(sql`update organizations set name = 'x' where id = ${O.org.id}`)).rejects.toThrow();
+  it("the runtime role may change the settings of its own organization, and not its code or its deletion mark", async () => {
+    const refusal = async (q: ReturnType<typeof sql>) => { try { await c.app.execute(q); } catch (e) { return String((e as { cause?: unknown }).cause ?? e); } return "no error"; }; // Drizzle wraps the database's message
+    expect(await refusal(sql`update organizations set slug = 'x' where id = ${O.org.id}`)).toMatch(/permission denied/);
+    expect(await refusal(sql`update organizations set deleted_at = now() where id = ${O.org.id}`)).toMatch(/permission denied/);
+    // the names are allowed columns, but only inside the organization's own context: with none, no row is visible to the policy
+    const none = await c.app.execute(sql`update organizations set name = 'x' where id = ${O.org.id}`);
+    expect((none as unknown as { rowCount: number }).rowCount).toBe(0);
+    expect((await c.admin.select({ n: organizations.name }).from(organizations).where(eq(organizations.id, O.org.id)))[0]!.n).not.toBe("x");
   });
 });
 

@@ -301,7 +301,6 @@ describe("replace (partial restore in the same database)", () => {
     await src.query("delete from task_labels where org_id = $1", [O.org.id]);
     await src.query("delete from labels where org_id = $1", [O.org.id]);
     await src.query("insert into tasks (org_id, project_id, title, created_by) values ($1, $2, 'Junk added later', $3)", [O.org.id, O.project.id, u.admin!.id]);
-    await src.query("update organizations set name = 'Renamed later' where id = $1", [O.org.id]);
     await src.query("insert into jobs (kind, org_id, payload, run_at) values ('calendar.reconcile', $1, '{}'::jsonb, now())", [O.org.id]).catch(() => undefined);
 
     const dry = await importOrganization(src, before, { replace: true });
@@ -328,6 +327,19 @@ describe("replace (partial restore in the same database)", () => {
     await src.query("update organizations set registration_open = true where id = $1", [O.org.id]);
     await importOrganization(src, closed, { replace: true, apply: true });
     expect((await src.query("select registration_open as open from organizations where id = $1", [O.org.id])).rows[0].open).toBe(true);
+  });
+
+  it("keeps the names as they are now: restoring an older bundle never undoes a rename of the organization or of the product", async () => {
+    const names = async () => (await src.query("select name, app_name from organizations where id = $1", [O.org.id])).rows[0] as { name: string; app_name: string | null };
+    const original = await names();
+    const older = await exportOrganization(src, O.org.slug); // taken under the old names
+    await src.query("update organizations set name = 'Renamed later', app_name = 'Renamed Product' where id = $1", [O.org.id]);
+    try {
+      await importOrganization(src, older, { replace: true, apply: true });
+      expect(await names()).toEqual({ name: "Renamed later", app_name: "Renamed Product" });
+    } finally {
+      await src.query("update organizations set name = $1, app_name = $2 where id = $3", [original.name, original.app_name, O.org.id]);
+    }
   });
 
   it("keeps the automatic-e-mail switch as it is now, in both directions, without touching the registration switch", async () => {

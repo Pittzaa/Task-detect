@@ -48,7 +48,7 @@
    psql '<owner direct string>' -v ON_ERROR_STOP=1 -c "$(sed 's/{{APP_ROLE}}/tt_app/g' scripts/grants.sql)"
    ```
 
-   **รันส่วนให้สิทธิ์ (grants) ซ้ำหลังทุก migration** (ทุกครั้งที่มีไฟล์ใหม่ใน `drizzle/`; migration ไม่ได้ให้สิทธิ์กับ role ของแอป และบางรุ่นเปลี่ยนสิทธิ์ระดับคอลัมน์ เช่นสวิตช์เปิด/ปิดสมัครสมาชิก) แล้วรัน `pnpm verify:database` ซ้ำ
+   **รันส่วนให้สิทธิ์ (grants) ซ้ำหลังทุก migration และทุกครั้งที่ `scripts/grants.sql` เปลี่ยน** (ทุกครั้งที่มีไฟล์ใหม่ใน `drizzle/` หรือ `git diff <เวอร์ชันเดิม> -- scripts/grants.sql` ไม่ว่าง เช่นเวอร์ชันที่ให้ผู้ดูแลเปลี่ยนชื่อองค์กรได้ไม่มี migration แต่เพิ่มสิทธิ์คอลัมน์ `name`; migration ไม่ได้ให้สิทธิ์กับ role ของแอป และบางรุ่นเปลี่ยนสิทธิ์ระดับคอลัมน์ เช่นสวิตช์เปิด/ปิดสมัครสมาชิก) แล้วรัน `pnpm verify:database` ซ้ำ
 6. สร้าง role ของระบบและองค์กรแรก (ยังคงเป็น owner; bootstrap ทำงานได้กับ owner ที่ไม่มี
    `BYPASSRLS` — มีเทสต์ใน `tests/integration/owner-role.test.ts`):
 
@@ -99,7 +99,7 @@ Google อาจกำหนดให้ยืนยันหน้า OAuth con
 4. เพิ่มโดเมนและตั้ง `APP_URL` เป็นโดเมนนั้น **ก่อน** deploy ครั้งแรก (ค่านี้ถูกฝังในลิงก์อีเมล การตรวจ origin ของ CSRF และ OAuth redirect)
 5. Deploy ห้ามรัน migration ในขั้น build: ให้รันโดยตั้งใจ (ข้อ 2.5) *ก่อน* ปล่อยเวอร์ชันที่ต้องใช้
 
-ลำดับสำหรับเวอร์ชันที่มี migration: **migrate → grants → deploy** migration ใน repo นี้เป็นแบบเพิ่มอย่างเดียวและเข้ากันได้กับ build เดิม
+ลำดับสำหรับเวอร์ชันที่มี migration (หรือที่แก้ `scripts/grants.sql` แม้ไม่มี migration; ข้ามขั้น migrate ได้ถ้าไม่มี): **migrate → grants → deploy** migration ใน repo นี้เป็นแบบเพิ่มอย่างเดียวและเข้ากันได้กับ build เดิม
 build เก่าจึงยังทำงานได้ระหว่างสลับ endpoint ตรวจความพร้อมจะรายงาน build ที่ล้ำหน้าฐานข้อมูล (เช็ค `migrations`) แทนที่จะพังตอนใช้ครั้งแรก ส่วนฐานข้อมูลที่ล้ำหน้า build (เช่นหลังย้อน deploy) จะแจ้งเตือนในรายละเอียดแต่ไม่ถือว่าล่ม
 
 ## 7. โดเมน คุกกี้ และ CSRF
