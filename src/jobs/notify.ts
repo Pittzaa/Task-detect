@@ -170,10 +170,16 @@ export async function deliverToUsers(
   const readers = [...(await readersOf(tx, o.orgId, o.task, candidates))];
   const inApp = await enabledUsers(tx, o.orgId, readers, "in_app", o.type);
   // Due-soon and overdue reminders are not e-mailed one task at a time: they are combined into one e-mail a day (handlers/deadline.ts).
-  const email = COMBINED_EMAIL.has(o.type) ? new Set<string>() : await enabledUsers(tx, o.orgId, readers, "email", o.type);
+  const wantsEmail = await enabledUsers(tx, o.orgId, readers, "email", o.type);
+  const email = COMBINED_EMAIL.has(o.type) ? new Set<string>() : wantsEmail;
   let created = 0;
   for (const userId of readers) {
-    if (!inApp.has(userId) && !email.has(userId)) continue;
+    if (!inApp.has(userId) && !email.has(userId)) {
+      // No row: this person gets the combined deadline e-mail instead of a notification. It still counts as "handled" so that what follows a
+      // reminder (the Discord message, whose own job key keeps it from going twice) does not depend on the bell being switched on.
+      if (COMBINED_EMAIL.has(o.type) && wantsEmail.has(userId)) created++;
+      continue;
+    }
     const id = await insertNotification(tx, { orgId: o.orgId, userId, type: o.type, taskId: o.task.id, actorId: o.actorId ?? null, params: o.params, dedupeKey: o.key, inApp: inApp.has(userId), emailWanted: email.has(userId) });
     if (!id) continue;
     created++;

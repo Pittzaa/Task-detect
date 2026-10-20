@@ -99,25 +99,27 @@ export async function withTenant<T>(
   auth: { userId: string; orgId: string },
   fn: (s: TenantSession) => Promise<T>,
 ): Promise<T> {
+  // one spelling of an id everywhere: the database reads upper and lower case alike, but our counters and comparisons are plain strings
+  const orgId = auth.orgId.toLowerCase();
   await assertRlsEnforced(db);
   let denied: { permission: string } | undefined;
   try {
     return await db.transaction(async (tx) => {
       await setContext(tx, auth.userId, null);
-      const probe = await loadMembershipStatus(tx, auth.userId, auth.orgId);
+      const probe = await loadMembershipStatus(tx, auth.userId, orgId);
       if (probe !== "approved") throw notFound();
 
-      await setContext(tx, auth.userId, auth.orgId);
-      const principal = await loadPrincipal(tx, auth.userId, auth.orgId);
+      await setContext(tx, auth.userId, orgId);
+      const principal = await loadPrincipal(tx, auth.userId, orgId);
       if (!principal || principal.membershipStatus !== "approved") throw notFound();
 
       return fn({
         tx,
-        orgId: auth.orgId,
+        orgId,
         userId: auth.userId,
         principal,
         require(permission, resource = {}) {
-          if (!can(principal, permission, { orgId: auth.orgId, ...resource })) {
+          if (!can(principal, permission, { orgId, ...resource })) {
             throw forbidden({ permission });
           }
         },

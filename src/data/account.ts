@@ -14,7 +14,7 @@ import type { TenantSession } from "./tenant";
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const INVITE_RESEND_SECONDS = 15 * 60;
 /** The allowance of one address in one organization (see createInvitation); the route gives it back when the e-mail could not be sent. */
-export const inviteAddressKey = (orgId: string, email: string) => `invite:addr:${orgId}:${sha256Hex(email.trim().toLowerCase())}`;
+export const inviteAddressKey = (orgId: string, email: string) => `invite:addr:${orgId.toLowerCase()}:${sha256Hex(email.trim().toLowerCase())}`;
 
 export async function setCtx(tx: Tx, ctx: { userId: string; orgId?: string | null; orgSlug?: string; inviteTokenHash?: string }) {
   await tx.execute(sql`select

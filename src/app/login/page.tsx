@@ -19,13 +19,18 @@ function LoginForm() {
   const [useBackup, setUseBackup] = useState(false);
   // `error` comes back from a redirect (Better Auth appends it); only its kind is used, the text itself is never shown
   const redirected = params.get("error");
+  // `verified` comes from the e-mail verification link, `reset` from a finished password reset. A verification link that failed (expired after an
+  // hour, or already used) arrives with `error` too: say so and offer a new link instead of announcing success.
+  const verifyFailed = !!params.get("verified") && !!redirected;
   const [message, setMessage] = useState<{ kind: "error" | "success" | "warn"; text: string } | undefined>(() => (
-    params.get("verified") ? { kind: "success", text: t("ui.password_changed") }
+    verifyFailed ? { kind: "warn", text: t("ui.verify_link_failed") }
+    : params.get("verified") ? { kind: "success", text: t("ui.email_verified") }
+    : params.get("reset") ? { kind: "success", text: t("ui.password_changed") }
     : params.get("erased") ? { kind: "success", text: t("ui.erased_ok") }
     : redirected ? { kind: "error", text: /registration_closed/i.test(redirected) ? t("error.registration_closed") : t("ui.signin_failed_redirect") }
     : undefined));
   const [busy, setBusy] = useState(false);
-  const [needsVerify, setNeedsVerify] = useState(false);
+  const [needsVerify, setNeedsVerify] = useState(verifyFailed);
   const [google, setGoogle] = useState(false);
 
   useEffect(() => { void api<{ google?: boolean }>("/api/auth-config").then((c) => setGoogle(!!c.google)).catch(() => undefined); }, []);

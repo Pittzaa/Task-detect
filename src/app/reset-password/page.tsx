@@ -17,7 +17,7 @@ function Form() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true); setError(false);
-    try { await authApi("/reset-password", { newPassword: password, token }); router.replace("/login?verified=1"); }
+    try { await authApi("/reset-password", { newPassword: password, token }); router.replace("/login?reset=1"); }
     catch { setError(true); }
     finally { setBusy(false); }
   }

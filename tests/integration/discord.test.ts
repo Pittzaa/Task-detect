@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { withTenant } from "@/data/tenant";
 import { setProjectTeams } from "@/data/structure";
 import { changeStatus, createTask, deleteTask, setAssignees } from "@/data/tasks";
+import { updateSettings } from "@/data/notifications";
 import { createDestination, deleteDestination, jobHealth, listDestinations, rotateDestination, updateDestination } from "@/data/integrations";
 import { AppError } from "@/lib/errors";
 import { deliveryAttempts, integrationDestinations, jobs, users } from "@/db/schema";
@@ -279,6 +280,24 @@ describe("delivery", () => {
     await remindersScan(ctx, {} as JobRow);
     await pump(ctx, 1);
     expect(d.calls.filter((x) => x.body.content.includes("[Alerts]") && x.body.content.includes(t.id))).toHaveLength(1);
+    await run("admin", (s) => deleteDestination(s, dest.id));
+  });
+});
+
+describe("alerts and the assignee's own notification choices", () => {
+  it("a due-soon or overdue alert still reaches the destination when its only assignee has the bell off for it (their e-mail choice is the combined deadline e-mail)", async () => {
+    const dest = await mkDest({ name: "Quiet bell", events: ["task.overdue"] });
+    const who = await makeUser(c.admin, "nobell");
+    await addMember(c.admin, O.org.id, who.id, { role: "member" });
+    await withTenant(c.app, { userId: who.id, orgId: O.org.id }, (s) => updateSettings(s, { settings: [{ channel: "in_app", event: "task.overdue", enabled: false }] }));
+    const d = fakeDiscord();
+    const { ctx, clock } = makeJobCtx(c.app, { fetchImpl: d.fetch });
+    const t = await mkTask({ dueDate: "2026-04-01", primaryAssigneeId: who.id });
+    clock.now = new Date("2026-04-03T05:00:00Z");
+    await remindersScan(ctx, {} as JobRow);
+    await remindersScan(ctx, {} as JobRow); // the second scan changes nothing: the destination's job has a key
+    await pump(ctx, 1);
+    expect(d.calls.filter((x) => x.body.content.includes("[Quiet bell]") && x.body.content.includes(t.id))).toHaveLength(1);
     await run("admin", (s) => deleteDestination(s, dest.id));
   });
 });

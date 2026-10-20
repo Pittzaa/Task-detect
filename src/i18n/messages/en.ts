@@ -340,6 +340,8 @@ export const en = {
   "ui.verify_resent": "If an account exists for this e-mail and it is not verified yet, a new link has been sent.",
   "ui.verify_limited": "A verification link can be sent once every 10 minutes for each address. Check your inbox and spam folder, then try again later.",
   "ui.password_changed": "Password updated. You can sign in now.",
+  "ui.email_verified": "Your e-mail is verified. You can sign in now.",
+  "ui.verify_link_failed": "This verification link has expired or was already used. Enter your e-mail below and press the button to get a new one (if the address is already verified, just sign in).",
   "ui.invalid_token": "This link is invalid or has expired.",
   "ui.recurring_tasks": "Recurring tasks",
   "ui.recurring_hint": "Tasks that are created automatically on a schedule. Tasks that are in the past, started or finished are never changed.",

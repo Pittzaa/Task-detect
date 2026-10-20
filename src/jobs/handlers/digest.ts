@@ -2,12 +2,13 @@ import { and, desc, eq, gte, inArray, isNull, ne } from "drizzle-orm";
 import { digestLog, memberships, notificationPrefs, notifications, organizations, tasks } from "@/db/schema";
 import { digestPeriod, quietHoursEnd } from "@/domain/notifications";
 import { asEmailSchedule, emailRunAllowed } from "@/domain/email-schedule";
-import { addDays, todayIn } from "@/domain/time";
+import { addDays } from "@/domain/time";
 import { renderEmail } from "@/integrations/email/templates";
 import { t } from "@/i18n";
 import { logger } from "@/lib/logger";
 import { myTasksLink } from "@/lib/links";
 import { withWorker, withWorkerOrg } from "../context";
+import { DEADLINE_SEND_HOUR } from "./deadline";
 import { enabledUsers, loadProfiles, renderNotifications } from "../notify";
 import { Deferred, type JobHandler } from "../worker";
 
@@ -98,7 +99,9 @@ async function coveredByDeadlineEmail(tx: Parameters<Parameters<typeof withWorke
   const soonOn = (await enabledUsers(tx, orgId, [userId], "email", "task.due_soon")).has(userId);
   const found = await tx.select({ id: tasks.id, status: tasks.status, dueDate: tasks.dueDate, deletedAt: tasks.deletedAt }).from(tasks).where(and(eq(tasks.orgId, orgId), inArray(tasks.id, [...new Set(rows.map((n) => n.taskId!))])));
   const byId = new Map(found.map((r) => [r.id, r]));
-  const today = todayIn(tz, now);
+  // the same day the deadline e-mail judges by (its 09:00 period's date, handlers/deadline.ts), not the calendar date right now: between midnight
+  // and 09:00 the two differ, and a reminder must not be dropped here for a task that e-mail will not list yet
+  const today = digestPeriod(now, tz, "daily", DEADLINE_SEND_HOUR).key.slice("daily:".length);
   const tomorrow = addDays(today, 1);
   const out = new Set<string>();
   for (const n of rows) {

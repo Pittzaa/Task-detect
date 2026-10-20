@@ -2,10 +2,9 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { invitations, organizations } from "@/db/schema";
 import { withWorker, withWorkerOrg } from "@/jobs/context";
-import { AppError } from "@/lib/errors";
 import { displayNameSchema, imageSchema } from "@/lib/profile-fields";
 import { JSON_TYPE } from "./auth-throttle";
-import { consumeRateLimit } from "./rate-limit";
+import { takeRateLimit } from "./rate-limit";
 
 export interface RegistrationState {
   /** Organizations that exist. This product is meant to run with exactly one. */
@@ -70,11 +69,11 @@ export async function guardSignUp(req: Request, db: Db): Promise<Response | null
   if (!displayNameSchema.safeParse(body.name).success) return refuse(400, "INVALID_NAME", "Name must be 1-100 characters without control characters");
   if (body.image !== undefined && body.image !== null && !imageSchema.safeParse(body.image).success) return refuse(400, "INVALID_IMAGE", "Image address is too long");
   if ((await registrationState(db)).open) return null;
-  try {
-    await consumeRateLimit(db, "signup:closed", 3600, CLOSED_SIGNUP_PER_HOUR);
-  } catch (e) {
-    if (e instanceof AppError && e.code === "RATE_LIMITED") return refuse(429, "RATE_LIMITED", "Too many requests. Please try again later.", { "retry-after": "3600" });
-    throw e;
+  const slot = await takeRateLimit(db, "signup:closed", 3600, CLOSED_SIGNUP_PER_HOUR);
+  if (!slot.allowed) {
+    // when the allowance is back, not a flat hour: the window began at the first attempt
+    const wait = Math.max(1, Math.ceil((slot.resetAt.getTime() - Date.now()) / 1000));
+    return refuse(429, "RATE_LIMITED", "Too many requests. Please try again later.", { "retry-after": String(wait) });
   }
   if (await canRegister(db, body.email)) return null;
   return refuse(403, "REGISTRATION_CLOSED", "Registration is closed");

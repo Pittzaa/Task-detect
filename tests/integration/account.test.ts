@@ -191,6 +191,24 @@ describe("invitation e-mail that could not be sent", () => {
   });
 });
 
+describe("invitation limits do not depend on how the organization id is spelled", () => {
+  it("the same organization written in upper case shares the allowance of the address (and of the organization)", async () => {
+    const O = await makeOrg(c.admin, "InviteCaseOrg");
+    const { client } = await registerAndSignIn(app, "caseadmin");
+    const [au] = await c.admin.select().from(users).where(eq(users.name, "caseadmin"));
+    await addMember(c.admin, O.org.id, au!.id, { role: "orgadmin" });
+    const role = await systemRoleId(c.admin, "viewer");
+    const email = `case-${Date.now()}@example.test`;
+    const post = (orgId: string) => client.route(inviteRoute as never, "POST", `/api/orgs/${orgId}/invitations`, { email, roleId: role, locale: "en" }, { orgId });
+    expect(O.org.id).toBe(O.org.id.toLowerCase()); // (the database gives it back in lower case)
+    expect((await post(O.org.id)).status).toBe(201);
+    const shouting = O.org.id.toUpperCase();
+    expect(shouting).not.toBe(O.org.id);
+    expect((await post(shouting)).status).toBe(429); // before: a second spelling had its own counter and sent a second e-mail
+    expect(app.email.sent.filter((m) => m.to === email)).toHaveLength(1);
+  });
+});
+
 describe("join requests and approval", () => {
   let O: Awaited<ReturnType<typeof makeOrg>>;
   let slug: string;

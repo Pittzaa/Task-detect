@@ -266,6 +266,26 @@ describe("digests", () => {
     expect(kept.text).toContain(`http://localhost:3000/o/${O.org.id}/my-tasks`);
   });
 
+  it("between midnight and 09:00 a reminder is not dropped as 'covered' for a task the deadline e-mail does not list yet", async () => {
+    const who = await makeUser(c.admin, "smallhours");
+    await addMember(c.admin, O.org.id, who.id, { role: "member" });
+    await c.admin.update(users).set({ timezone: "Asia/Bangkok", locale: "en" }).where(eq(users.id, who.id));
+    await withTenant(c.app, { userId: who.id, orgId: O.org.id }, (s) => updateSettings(s, { digest: "daily" }));
+    // due on the 8th, reminder 2 days before: it exists from 09:00 on the 6th
+    await mk({ title: "SmallHoursTask", dueDate: "2026-07-08", reminderDaysBefore: 2, primaryAssigneeId: who.id });
+    const { ctx, clock, email } = makeJobCtx(c.app);
+    clock.now = new Date("2026-07-06T03:00:00Z"); // 10:00 on the 6th
+    await pump(ctx, 1);
+    await remindersScan(ctx, job);
+    // 03:00 on the 7th: the calendar says the 8th is "tomorrow", but the deadline e-mail still judges by the period that began at 09:00 on the 6th,
+    // for which the 8th is two days away and not listed. The digest must keep this reminder.
+    clock.now = new Date("2026-07-06T20:00:00Z");
+    await digestRun(ctx, job);
+    const mine = email.sent.filter((m) => m.to === who.email && /digest/i.test(m.subject));
+    expect(mine).toHaveLength(1);
+    expect(mine[0]!.html).toContain("SmallHoursTask");
+  });
+
   it("a failed send rolls the period claim back so the next run retries; no duplicate after success", async () => {
     const who = await makeUser(c.admin, "retrier");
     await addMember(c.admin, O.org.id, who.id, { role: "member" });
