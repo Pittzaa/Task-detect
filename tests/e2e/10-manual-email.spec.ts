@@ -172,7 +172,15 @@ test("the daily mode: an administrator chooses 'once a day at 23:00 Thai time', 
     const before = mails().length;
     expect((await post(page, `/api/orgs/${acme()}/tasks`, { projectId: projects.projects[0]!.id, title: "Daily mode task", primaryAssigneeId: sam.userId })).status()).toBe(201);
     if (!inWindow) {
-      await expect.poll(async () => (await waiting(page)).waiting, { timeout: 45_000 }).toBeGreaterThanOrEqual(1); // held, and counted as waiting
+      // wait for THIS notification (the app makes it, and holds its e-mail, a moment after the task is saved). The waiting count alone is not
+      // enough: other e-mails may be waiting already, and pressing the button before this one exists would send those and miss it.
+      const other = await browser.newContext();
+      await other.addCookies([{ name: "tt_locale", value: "en", url: ORIGIN }]);
+      const samPage = await other.newPage();
+      await login(samPage, "sam@e2e.test");
+      await expect.poll(async () => JSON.stringify(await (await samPage.request.get(`/api/orgs/${acme()}/notifications`)).json()).includes("Daily mode task"), { timeout: 45_000 }).toBe(true);
+      await other.close();
+      expect((await waiting(page)).waiting).toBeGreaterThanOrEqual(1); // held, and counted as waiting
       expect(mails().slice(before).filter((m) => m.to === "sam@e2e.test" && m.text.includes("Daily mode task"))).toHaveLength(0);
       await page.goto(`/o/${acme()}/settings`);
       await section().getByRole("button", { name: "Send waiting e-mails now" }).click();
