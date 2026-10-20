@@ -7,9 +7,9 @@ Everything here was run on the release candidate; the exact results are in [READ
 ```bash
 pnpm lint                      # ESLint (React hooks rules included)
 pnpm typecheck                 # tsc --noEmit
-pnpm test:unit                 # 317 tests, no database
-TEST_DATABASE_URL=postgres://postgres@127.0.0.1:54329/tasktracker_test pnpm test:integration   # 591 tests
-pnpm test:e2e                  # builds, then 102 browser tests (Chromium) against a production build
+pnpm test:unit                 # 329 tests, no database
+TEST_DATABASE_URL=postgres://postgres@127.0.0.1:54329/tasktracker_test pnpm test:integration   # 611 tests
+pnpm test:e2e                  # builds, then 104 browser tests (Chromium) against a production build
 pnpm test:e2e:browsers         # the same suite once per engine (chromium, firefox, webkit); the last two have never been run
 pnpm load                      # load test against a production build with seeded volume (see below)
 pnpm build                     # production build
