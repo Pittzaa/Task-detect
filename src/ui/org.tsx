@@ -7,6 +7,8 @@ export interface OrgCtx {
   can: Record<string, boolean>;
   user: { id: string; name: string; email: string; locale: "th" | "en"; timezone: string };
   hasAnyAccess: boolean;
+  /** Asks the server for the shell's context again (after something in it was changed on a settings page). */
+  reload: () => void;
 }
 export const OrgContext = createContext<OrgCtx | null>(null);
 export function useOrg(): OrgCtx {

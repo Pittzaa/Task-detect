@@ -107,14 +107,15 @@ describe("a plain (non-superuser, non-BYPASSRLS) database owner", () => {
       try { return await app.query(sql); } finally { await app.query("rollback"); }
     };
     try {
-      // own organization, the one allowed column
+      // own organization, the allowed columns (the switches and the two names)
       expect((await inOrg(acme.id, `update organizations set registration_open = false where id = '${acme.id}'`)).rowCount).toBe(1);
+      expect((await inOrg(acme.id, `update organizations set name = 'renamed' where id = '${acme.id}'`)).rowCount).toBe(1);
+      expect((await inOrg(acme.id, `update organizations set name = 'renamed' where id = '${second.id}'`)).rowCount).toBe(0); // another organization's name is out of reach too
       // another organization's row is invisible to the policy
       expect((await inOrg(acme.id, `update organizations set registration_open = false where id = '${second.id}'`)).rowCount).toBe(0);
       // no organization context at all
       expect((await inOrg("", `update organizations set registration_open = false where id = '${acme.id}'`)).rowCount).toBe(0);
       // every other column stays out of reach
-      await expect(inOrg(acme.id, `update organizations set name = 'renamed' where id = '${acme.id}'`)).rejects.toThrow(/permission denied/);
       await expect(inOrg(acme.id, `update organizations set slug = 'renamed' where id = '${acme.id}'`)).rejects.toThrow(/permission denied/);
       await expect(inOrg(acme.id, `update organizations set deleted_at = now() where id = '${acme.id}'`)).rejects.toThrow(/permission denied/);
       // and the worker flag does not widen it

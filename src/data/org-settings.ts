@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { auditLogs, organizations } from "@/db/schema";
 import { appNameOrDefault, parseAppName } from "@/domain/app-name";
 import { asEmailSchedule, type EmailSchedule } from "@/domain/email-schedule";
+import { parseOrgName } from "@/domain/org-name";
 import { notFound, validation } from "@/lib/errors";
 import type { TenantSession } from "./tenant";
 
@@ -49,6 +50,22 @@ export async function setEmailSchedule(s: TenantSession, schedule: EmailSchedule
   if (!res[0]) throw notFound();
   await s.tx.insert(auditLogs).values({ orgId: s.orgId, actorUserId: s.userId, action: schedule === "daily" ? "org.email_schedule_daily" : "org.email_schedule_instant", targetType: "organization", targetId: s.orgId });
   return res[0];
+}
+
+/**
+ * Renames the organization itself: the heading of the left menu, its entry in "Your organizations" and the {org} of invitation e-mails. The
+ * organization code (slug) does not change. Separate from the name of the product (setAppName). Rules: src/domain/org-name.ts (422 when refused;
+ * an organization cannot be left without a name). Only people who manage settings (the administrators) may.
+ */
+export async function setOrgName(s: TenantSession, input: unknown) {
+  s.require("org.manage_settings");
+  const parsed = parseOrgName(input);
+  if (!parsed.ok) throw validation("val.org_name");
+  const [before] = await s.tx.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, s.orgId));
+  const res = await s.tx.update(organizations).set({ name: parsed.value }).where(eq(organizations.id, s.orgId)).returning({ name: organizations.name });
+  if (!res[0]) throw notFound();
+  await s.tx.insert(auditLogs).values({ orgId: s.orgId, actorUserId: s.userId, action: "org.rename", targetType: "organization", targetId: s.orgId, metadata: { from: before?.name ?? null, to: parsed.value } });
+  return { name: res[0].name };
 }
 
 /**

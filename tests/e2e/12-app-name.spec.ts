@@ -73,9 +73,45 @@ test("an administrator names the system; the menu, the sign-in page, the page ti
   }
 });
 
+test("an administrator renames the organization: the heading of the left menu follows at once, the name of the product stays, and it can be set back", async ({ page }) => {
+  const orgCard = page.getByRole("region", { name: "Name of the organization" });
+  const heading = page.locator(".sidebar .brand");
+  await login(page, "admin@e2e.test");
+  await page.goto(`/o/${acme()}/settings`);
+  await page.getByRole("tab", { name: "General" }).click();
+  await expect(orgCard).toBeVisible();
+  await expect(orgCard.getByLabel("Organization name")).toHaveValue("Acme Co");
+  await expect(heading).toHaveText("Acme Co");
+  await expect(orgCard.getByRole("button", { name: "Save organization name" })).toBeDisabled(); // nothing to save yet
+  await expectAccessible(page, "settings: general, with the organization name");
+
+  try {
+    await orgCard.getByLabel("Organization name").fill("   ");
+    await orgCard.getByRole("button", { name: "Save organization name" }).click();
+    await expect(orgCard.getByRole("alert")).toContainText(/1 to 80 characters/);
+    await expect(heading).toHaveText("Acme Co");
+
+    await orgCard.getByLabel("Organization name").fill("  Acme   Holdings (HQ) ");
+    await orgCard.getByRole("button", { name: "Save organization name" }).click();
+    await expect(page.getByText("Organization name changed.")).toBeVisible();
+    await expect(heading).toHaveText("Acme Holdings (HQ)"); // the menu, without a reload
+    await expect(orgCard.getByLabel("Organization name")).toHaveValue("Acme Holdings (HQ)");
+    await expect(page.getByRole("navigation", { name: "Task Tracker" })).toBeVisible(); // the product's name is a different thing
+    await expect(card(page).getByLabel("Name")).toHaveValue("Task Tracker");
+
+    await page.reload(); // and it is what the server has
+    await expect(page.locator(".sidebar .brand")).toHaveText("Acme Holdings (HQ)");
+  } finally {
+    expect((await put(page, { name: "Acme Co" })).status()).toBe(200); // the rest of the suite sees the original
+  }
+  await page.reload();
+  await expect(page.locator(".sidebar .brand")).toHaveText("Acme Co");
+});
+
 test("only an administrator may change it, and the server says so", async ({ page }) => {
   await login(page, "sam@e2e.test");
   expect((await put(page, { appName: "Not allowed" })).status()).toBe(403);
+  expect((await put(page, { name: "Not allowed either" })).status()).toBe(403);
   expect((await page.request.get(`/api/orgs/${acme()}/settings`)).status()).toBe(403);
   await page.goto(`/o/${acme()}/settings`);
   await expect(page.getByRole("tab", { name: "General" })).toHaveCount(0);

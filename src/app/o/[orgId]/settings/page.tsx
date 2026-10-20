@@ -56,6 +56,7 @@ function GeneralSettings() {
   const open = chosen && q.data === chosen.shownWith ? chosen.value : q.data!.registrationOpen;
   return (
     <>
+      <OrgNameSettings />
       <AppNameSettings />
       <section className="card stack" aria-labelledby="h-registration">
         <h2 id="h-registration">{t("ui.registration_title")}</h2>
@@ -67,6 +68,40 @@ function GeneralSettings() {
         <p className="muted">{open ? t("ui.registration_hint_open") : t("ui.registration_hint_closed")}</p>
       </section>
     </>
+  );
+}
+
+/** Administrators: the name of the organization itself, the heading of the left menu (separate from the name of the product below it). */
+function OrgNameSettings() {
+  const { orgId, reload } = useOrg();
+  const { t, err } = useI18n();
+  const toast = useToast();
+  const q = useQuery<{ name: string }>(`org-settings:${orgId}`, () => api(`/api/orgs/${orgId}/settings`));
+  const [draft, setDraft] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  async function save() {
+    setBusy(true); setError(undefined);
+    try {
+      await api(`/api/orgs/${orgId}/settings`, { method: "PUT", body: { name: draft } });
+      setDraft(undefined); q.reload(); reload(); toast(t("ui.org_name_saved")); // the menu follows at once
+    } catch (e) { setError(err(e)); } finally { setBusy(false); }
+  }
+  if (q.loading && !q.data) return <Loading />;
+  if (q.error) return <ErrorNote error={q.error} onRetry={q.reload} />;
+  const shown = draft ?? q.data!.name;
+  return (
+    <section className="card stack" aria-labelledby="h-org-name">
+      <h2 id="h-org-name">{t("ui.org_name_title")}</h2>
+      <p className="muted">{t("ui.org_name_hint")}</p>
+      <form className="stack" onSubmit={(e) => { e.preventDefault(); void save(); }} noValidate>
+        {error && <Notice kind="error">{error}</Notice>}
+        <Field label={t("ui.org_name_label")}>{(id) => <input id={id} value={shown} maxLength={80} autoComplete="off" onChange={(e) => setDraft(e.target.value)} />}</Field>
+        <div className="row">
+          <Btn type="submit" kind="primary" disabled={busy || draft === undefined || draft === q.data!.name}>{t("ui.org_name_save")}</Btn>
+        </div>
+      </form>
+    </section>
   );
 }
 

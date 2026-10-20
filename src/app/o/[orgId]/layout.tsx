@@ -18,7 +18,7 @@ export default function OrgLayout({ children }: { children: ReactNode }) {
   const [openedOn, setOpenedOn] = useState<string | null>(null);
   const open = openedOn === pathname; // opening is tied to the current page, so navigating closes the menu
   const setOpen = (v: boolean) => setOpenedOn(v ? pathname : null);
-  const ctx = useQuery(`ctx:${orgId}`, () => api<Omit<OrgCtx, "orgId">>(`/api/orgs/${orgId}/context`), { refreshMs: 5 * 60_000 });
+  const ctx = useQuery(`ctx:${orgId}`, () => api<Omit<OrgCtx, "orgId" | "reload">>(`/api/orgs/${orgId}/context`), { refreshMs: 5 * 60_000 });
 
   useEffect(() => { if (ctx.error?.status === 401) router.replace(`/login?next=${encodeURIComponent(pathname)}`); }, [ctx.error, router, pathname]);
   const profileLocale = ctx.data?.user.locale;
@@ -38,7 +38,7 @@ export default function OrgLayout({ children }: { children: ReactNode }) {
       </main>
     );
   }
-  const value: OrgCtx = { ...ctx.data, orgId };
+  const value: OrgCtx = { ...ctx.data, orgId, reload: ctx.reload };
   const base = `/o/${orgId}`;
   const link = (href: string, label: string) => (
     <Link key={href} href={`${base}${href}`} aria-current={pathname.startsWith(`${base}${href}`) ? "page" : undefined}>{label}</Link>
