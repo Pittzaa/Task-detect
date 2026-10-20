@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, like } from "drizzle-orm";
 import { GET as contextGET } from "@/app/api/orgs/[orgId]/context/route";
 import { POST as inviteRoute } from "@/app/api/orgs/[orgId]/invitations/route";
@@ -238,6 +238,22 @@ describe("the name where there is no organization to ask (sign-in pages, reset a
     expect(await installationBrand(c.app)).toBe("Bluebird");
     await setName(sole, null);
     expect(await installationBrand(c.app)).toBe(DEFAULT_APP_NAME);
+  });
+
+  it("is forgotten for every copy of the code in the process: a production build loads it once for the pages and once for the route that saves the name", async () => {
+    vi.resetModules();
+    const pages = await import("@/server/brand"); // the copy the sign-in page renders with
+    vi.resetModules();
+    const route = await import("@/server/brand"); // the copy the settings route calls forgetBrand on
+    expect(route.installationBrand).not.toBe(pages.installationBrand); // really two copies
+    await setName(sole, null);
+    pages.forgetBrand();
+    expect(await pages.installationBrand(c.app)).toBe(DEFAULT_APP_NAME); // remembered by the first copy
+    await c.admin.update(organizations).set({ appName: "Kingfisher" }).where(eq(organizations.id, sole.org.id)); // not through setName: nothing is forgotten
+    expect(await pages.installationBrand(c.app)).toBe(DEFAULT_APP_NAME); // still the remembered one
+    route.forgetBrand();
+    expect(await pages.installationBrand(c.app)).toBe("Kingfisher");
+    await setName(sole, null);
   });
 
   it("the verification and the password-reset e-mails carry it, with the sender name", async () => {

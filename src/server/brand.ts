@@ -11,10 +11,11 @@ import { withWorker } from "@/jobs/context";
  */
 export async function installationBrand(db: Db): Promise<string> {
   const now = Date.now();
-  if (cache && now - cache.at < CACHE_MS) return cache.name;
+  const remembered = read();
+  if (remembered && now - remembered.at < CACHE_MS) return remembered.name;
   const rows = await withWorker(db, (tx) => tx.select({ appName: organizations.appName }).from(organizations).where(isNull(organizations.deletedAt)).limit(2));
   const name = rows.length === 1 ? appNameOrDefault(rows[0]!.appName) : DEFAULT_APP_NAME;
-  cache = { name, at: now };
+  memory().cache = { name, at: now };
   return name;
 }
 
@@ -25,7 +26,11 @@ export async function brandOf(tx: Pick<Tx, "select">, orgId: string): Promise<st
 }
 
 // A page render asks for this on every request, so it is remembered for a few seconds. Changing the name clears it on the instance that
-// handled the change; other instances (serverless) pick the change up within CACHE_MS.
+// handled the change; other instances (serverless) pick the change up within CACHE_MS. The memory lives on globalThis because a production
+// build can load this file once for the page that renders the sign-in screen and once more for the route that saves the name; a plain
+// module variable would then be cleared in one copy and keep the old name in the other.
 const CACHE_MS = 10_000;
-let cache: { name: string; at: number } | undefined;
-export const forgetBrand = () => { cache = undefined; };
+type Memory = { cache?: { name: string; at: number } };
+const memory = (): Memory => ((globalThis as typeof globalThis & { __ttBrand?: Memory }).__ttBrand ??= {});
+const read = () => memory().cache;
+export const forgetBrand = () => { memory().cache = undefined; };
