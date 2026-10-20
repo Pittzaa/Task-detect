@@ -425,7 +425,7 @@ export const en = {
   "ui.general_settings": "General",
   "ui.registration_title": "Registration of new people",
   "ui.app_name_title": "Name of this system",
-  "ui.app_name_hint": "The name people see on the sign-in pages (while this is the only organization on the installation), in the page title and the menu, and in every e-mail this organization sends: the subject, the header, the footer and the name the e-mail comes from. Leave it empty to use the default name.",
+  "ui.app_name_hint": "The name people see on the sign-in pages (while this is the only organization on the installation), in the title of the browser tab, and in every e-mail this organization sends: the subject, the header, the footer and the name the e-mail comes from. Leave it empty to use the default name.",
   "ui.app_name_label": "Name",
   "ui.app_name_save": "Save name",
   "ui.app_name_reset": "Use the default name",

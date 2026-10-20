@@ -2,8 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { expectAccessible, login, mails, preferEnglish, state, waitMail } from "./helpers";
 
 /**
- * The administrators name the product (Settings -> General): the new name is on the sign-in page, in the page title, in the menu and in the
- * e-mails the organization sends. Runs after 11-registration-and-structure, which retires the second organization, so this installation holds exactly
+ * The administrators name the product (Settings -> General): the new name is on the sign-in page, in the page title, in the label of the menu (for
+ * screen readers: the heading in the left bar is the organization's own name) and in the e-mails the organization sends. Runs after 11-registration-and-structure, which retires the second organization, so this installation holds exactly
  * one and its name is the name of the whole system.
  */
 test.describe.configure({ mode: "serial" });
@@ -34,7 +34,7 @@ test("an administrator names the system; the menu, the sign-in page, the page ti
     await card(page).getByLabel("Name").fill(`  ${NAME} `);
     await card(page).getByRole("button", { name: "Save name" }).click();
     await expect(page.getByText("Name changed.")).toBeVisible();
-    await expect(page.getByRole("navigation", { name: NAME })).toBeVisible(); // the menu, at once
+    await expect(page.getByRole("navigation", { name: NAME })).toBeVisible(); // the menu's label (read by screen readers), at once
     await expect(card(page).getByLabel("Name")).toHaveValue(NAME);
     await expect(card(page).getByRole("button", { name: "Use the default name" })).toBeVisible();
 

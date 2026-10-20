@@ -66,7 +66,7 @@ describe("the name, over HTTP", () => {
     expect(await res.json()).toEqual({ appName: "Acme Tasks", appNameIsDefault: false });
     expect(await stored()).toBe("Acme Tasks");
     expect(await (await admin.route(settingsGET as never, "GET", url(), undefined, P())).json()).toMatchObject({ appName: "Acme Tasks", appNameIsDefault: false });
-    // the menu of every member reads it from the organization's context
+    // every member's copy of the name (the menu's label, the calendar option) is read from the organization's context
     for (const who of [admin, member]) {
       const ctx = (await (await who.route(contextGET as never, "GET", `/api/orgs/${org.org.id}/context`, undefined, P())).json()) as { org: { appName: string } };
       expect(ctx.org.appName).toBe("Acme Tasks");
