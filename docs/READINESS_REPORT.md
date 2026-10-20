@@ -28,7 +28,7 @@ All against PostgreSQL 16.15 on a local cluster, Node 22.22, pnpm 10.28, Chromiu
 | `scripts/backup.sh` with encryption | dump → AES-256 → checksum → decrypt → `pg_restore --list` verified; wrong passphrase rejected; refuses a role without `BYPASSRLS` (exit 3) |
 | Mutation checks (see [TESTING.md](TESTING.md)) | 56 deliberate breakages (6 on the original code, 50 on the extras), each caught by a test. Two of them were **not** caught at first (a work budget and a signal fingerprint) and the tests were made discriminating |
 
-Test inventory: 317 unit + 591 integration + 102 end-to-end = **1010 automated tests**. Source ≈ 13 400 lines, tests ≈ 10 000 lines (TypeScript, excluding scripts).
+Test inventory: 317 unit + 591 integration + 102 end-to-end = **1010 automated tests**. Source ≈ 15 500 lines, tests ≈ 14 700 lines (TypeScript, counted with `wc -l`, excluding scripts).
 
 Also run: `pnpm load` (60 000 tasks, 10 and 50 concurrent users, 0 errors; [TESTING.md](TESTING.md#load-test-pnpm-load)), the error-reporting delivery check against a local HTTPS stand-in for the tracker, and by-hand runs of `pnpm org` (export → `--replace` round trip on the E2E data: identical), `pnpm backup:attachments` and `pnpm privacy` against the E2E database with the least-privilege role.
 
@@ -42,14 +42,14 @@ Legend: ✅ verified here · ⚠️ verified only against fakes / locally, real 
 | Authentication and account approval | ✅ locally, ⚠️ e-mail | Registration, verification, approval, invitations, reset (revokes other sessions), 2FA with backup codes, session revocation, secure cookies. Real e-mail delivery (Resend) unverified. |
 | Task workflow, assignments, subtasks, dependencies | ✅ | Unit + 42 integration + browser tests; races covered. |
 | Search, views, bulk-action authorization | ✅ | Per-record authorization, partial/atomic bulk, stable paging, wildcard-safe search incl. Thai. |
-| Notifications without unauthorized disclosure | ✅ | Ids stored, text rendered after a fresh access check; mention → tick → bell + mail in the browser. |
+| Notifications without unauthorized disclosure | ✅ | Ids stored, text rendered after a fresh access check; mention → bell in the browser (no e-mail in the default manual mode); the button → HTML notification e-mail and deadline e-mail in the browser (`10-manual-email`). |
 | E-mail, Discord and Google Calendar behaviour | ⚠️ | Logic, idempotency, retries, duplicate prevention, one-way sync, revoked credentials and SSRF validation tested **with fakes**. **No live request ever reached Resend, Discord or Google.** Mock tests are not evidence that the live services accept the requests. |
 | Recurring tasks, time zones, Thai/English | ✅ (Chromium) | DST tests east/west of UTC, Buddhist Era, profile zone, language persisted, UI in both languages. |
 | Secure attachment access | ✅ filesystem store, ⚠️ Blob | Content sniffing, private download route, headers, byte-exact round trip, cap race fixed. **4 MB through the server; up to 25 MB by direct browser → Blob upload** (token bound to one object name/size/type, server-side inspection of the stored object: 14 tests, 5 deliberate breakages caught). The Vercel Blob client and the browser → Blob request are **type-checked / read from SDK source only, never run**; `DIRECT_UPLOADS=off` is the kill switch. |
 | Audit retention and deletion behaviour | ✅ | 90-day floor enforced **in the database**; 30-day trash; purge job tested end to end; append-only proven for the runtime role. |
 | Backup and a successful restore test | ⚠️ | **Local drill passed (above).** Neon’s own backups / point-in-time restore: unverified. Blob content: `pnpm backup:attachments` (hash-verified, incremental; tested with two filesystem stores, **not** with Blob). One organization can be exported/imported (`pnpm org`, tested across two real databases, never on Neon). A scheduled backup job is not in the repository. |
 | Test suite, type check, lint, production build, deployment configuration | ✅ locally, ⚠️ deployment | `vercel.json` (cron once a day at 23:00 Thai time, so it fits Vercel Hobby) and `vercel.pro.json` (every minute) never deployed; plan limits are from memory and could not be checked against Vercel's site from the build machine. |
-| Operational documentation and known limitations | ✅ | 16 documents; derived parts (permission matrix, ERD) are generated and guarded by tests. |
+| Operational documentation and known limitations | ✅ | 18 documents under `docs/` plus the two READMEs; derived parts (permission matrix, ERD) are generated and guarded by tests. |
 
 ## 4. Go-live blockers (clear all before real users)
 
@@ -81,7 +81,7 @@ Details and evidence: [SECURITY.md](SECURITY.md) §4, [TESTING.md](TESTING.md).
 * **Security hardening:** nonce-based CSP, security headers, NUL-byte rejection, production cookie verification.
 * **Product gaps closed:** recurring-tasks screen, backup-code sign-in, confirmations, accessibility fixes.
 * **Documentation:** the full set required by the brief, with generated parts guarded by tests.
-* **Migrations:** `0010` indexes, `0011` retention controls, `0012` owner bootstrap policies, `0013` the `tasks (org_id, updated_at)` index (15 in total, with `0014` the registration switch).
+* **Migrations:** `0010` indexes, `0011` retention controls, `0012` owner bootstrap policies, `0013` the `tasks (org_id, updated_at)` index (18 in total, with `0014` the registration switch, `0015` e-mail sending, `0016` the e-mail schedule and `0017` the product's name).
 
 ## 6b. Optional extras added after the first pass (each with tests and a deliberate-breakage check)
 
@@ -93,7 +93,7 @@ Details and evidence: [SECURITY.md](SECURITY.md) §4, [TESTING.md](TESTING.md).
 | Per-organization export/import / partial restore (`pnpm org`, encrypted bundle option) | ✅ two real databases (18 tests) + by hand on E2E data; ⚠️ never on Neon (needs a `BYPASSRLS` role) |
 | Attachment file backup/restore (`pnpm backup:attachments`) | ✅ two filesystem stores (6 tests); ⚠️ Blob implementation never run |
 | Direct browser → Blob uploads up to 25 MB | ✅ token + server-side inspection (14 tests); ❌ browser → Vercel Blob request unverified |
-| Safe Markdown in comments and descriptions | ✅ unit (67 incl. XSS corpus and a timing guard) + browser |
+| Safe Markdown in comments and descriptions | ✅ unit (69 incl. XSS corpus and a timing guard) + browser |
 | Change-signal refresh instead of 20–60 s timers (still polling, not push) | ✅ integration (11, permission-aware) + unit (9) + two-browser test; ⚠️ not real-time push |
 | Load test (`pnpm load`) and the fixes it led to; migration 0013 (index) | ✅ local shape check only |
 | Firefox / WebKit end-to-end runs | ⚠️ configured (`pnpm test:e2e:browsers`), **never run** |

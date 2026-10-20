@@ -8,6 +8,8 @@ import { t } from "@/i18n";
 import { logger } from "@/lib/logger";
 import { myTasksLink } from "@/lib/links";
 import { withWorker, withWorkerOrg } from "../context";
+import { fromNameFor } from "@/domain/app-name";
+import { brandOf } from "@/server/brand";
 import { DEADLINE_SEND_HOUR } from "./deadline";
 import { enabledUsers, loadProfiles, renderNotifications } from "../notify";
 import { Deferred, type JobHandler } from "../worker";
@@ -68,9 +70,10 @@ async function digestForUser(ctx: Parameters<JobHandler>[0], orgId: string, user
     if (!lines.length) return;
 
     const periodLabel = t(profile.locale, freq === "daily" ? "digest.daily" : "digest.weekly");
-    const app = t(profile.locale, "app.name");
+    const app = await brandOf(tx, orgId);
     const mail = renderEmail({
       locale: profile.locale,
+      app,
       heading: t(profile.locale, "email.digest.heading", { period: periodLabel }),
       intro: [t(profile.locale, "digest.intro")],
       list: lines,
@@ -78,6 +81,7 @@ async function digestForUser(ctx: Parameters<JobHandler>[0], orgId: string, user
     });
     await ctx.email.send({
       to: profile.email,
+      fromName: fromNameFor(app),
       subject: t(profile.locale, "email.digest.subject", { period: periodLabel, app }),
       text: mail.text,
       html: mail.html,

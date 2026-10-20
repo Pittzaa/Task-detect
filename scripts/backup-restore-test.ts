@@ -145,7 +145,7 @@ async function main() {
       // the two columns the runtime role may change on an organization: still granted on the restored copy, and only for its own row
       await app.query("begin");
       await app.query(`select set_config('app.org_id', $1, true)`, [orgs[0]!.id]);
-      const sw = await app.query(`update organizations set registration_open = registration_open, auto_email = auto_email, email_schedule = email_schedule where id = $1`, [orgs[0]!.id]).then((r) => r.rowCount === 1, () => false);
+      const sw = await app.query(`update organizations set registration_open = registration_open, auto_email = auto_email, email_schedule = email_schedule, app_name = app_name where id = $1`, [orgs[0]!.id]).then((r) => r.rowCount === 1, () => false);
       await app.query("rollback");
       check("the runtime role can still use the registration and automatic-e-mail switches of its own organization after restore", sw);
       const fn = await app.query(`select purge_audit_logs(90) is not null as ok`);

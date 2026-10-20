@@ -120,7 +120,9 @@ describe("throttleAccount", () => {
 
   it("ignores everything else: reads, other routes, bodies that are not JSON or have no e-mail", async () => {
     expect(await throttleAccount(new Request(`${BASE}/sign-in/email`, { method: "GET" }), c.app)).toBeNull();
-    expect(await throttleAccount(post("/sign-up/email", { email: fresh() }), c.app)).toBeNull();
+    // (sign-up is a limited route now, 3 an hour per address: its own test covers that; here a route that really is left alone)
+    const same = fresh();
+    expect(await attempts(30, () => post("/change-password", { email: same }))).toEqual(Array(30).fill(0)); // the same address thirty times: never refused
     expect(await attempts(30, () => post("/sign-in/email", "not json"))).toEqual(Array(30).fill(0));
     expect(await attempts(30, () => post("/sign-in/email", { email: 42 }))).toEqual(Array(30).fill(0));
   });

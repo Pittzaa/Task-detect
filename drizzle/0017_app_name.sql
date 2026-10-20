@@ -1,0 +1,2 @@
+ALTER TABLE "organizations" ADD COLUMN "app_name" text;--> statement-breakpoint
+ALTER TABLE "organizations" ADD CONSTRAINT "organizations_app_name_len" CHECK ("organizations"."app_name" is null or char_length("organizations"."app_name") between 1 and 40);

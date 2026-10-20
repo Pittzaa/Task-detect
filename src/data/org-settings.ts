@@ -1,15 +1,16 @@
 import { eq } from "drizzle-orm";
 import { auditLogs, organizations } from "@/db/schema";
+import { appNameOrDefault, parseAppName } from "@/domain/app-name";
 import { asEmailSchedule, type EmailSchedule } from "@/domain/email-schedule";
-import { notFound } from "@/lib/errors";
+import { notFound, validation } from "@/lib/errors";
 import type { TenantSession } from "./tenant";
 
 /** Organization-wide switches. Only people who may manage settings see or change them. */
 export async function getOrgSettings(s: TenantSession) {
   s.require("org.manage_settings");
-  const [org] = await s.tx.select({ name: organizations.name, slug: organizations.slug, registrationOpen: organizations.registrationOpen, autoEmail: organizations.autoEmail, emailSchedule: organizations.emailSchedule }).from(organizations).where(eq(organizations.id, s.orgId));
+  const [org] = await s.tx.select({ name: organizations.name, slug: organizations.slug, registrationOpen: organizations.registrationOpen, autoEmail: organizations.autoEmail, emailSchedule: organizations.emailSchedule, appName: organizations.appName }).from(organizations).where(eq(organizations.id, s.orgId));
   if (!org) throw notFound();
-  return { ...org, emailSchedule: asEmailSchedule(org.emailSchedule) };
+  return { ...org, emailSchedule: asEmailSchedule(org.emailSchedule), appName: appNameOrDefault(org.appName), appNameIsDefault: org.appName === null };
 }
 
 /**
@@ -48,4 +49,20 @@ export async function setEmailSchedule(s: TenantSession, schedule: EmailSchedule
   if (!res[0]) throw notFound();
   await s.tx.insert(auditLogs).values({ orgId: s.orgId, actorUserId: s.userId, action: schedule === "daily" ? "org.email_schedule_daily" : "org.email_schedule_instant", targetType: "organization", targetId: s.orgId });
   return res[0];
+}
+
+/**
+ * Renames the product for this organization: the name on the sign-in pages (while this is the installation's only organization), the page titles
+ * and menu, and in every e-mail it sends (subject, header, footer and the sender's display name). Anything the rules of src/domain/app-name.ts
+ * refuse is a 422; an empty value (or null) goes back to the default name. Only people who manage settings (the administrators) may.
+ */
+export async function setAppName(s: TenantSession, input: unknown) {
+  s.require("org.manage_settings");
+  const parsed = parseAppName(input);
+  if (!parsed.ok) throw validation("val.app_name");
+  const [before] = await s.tx.select({ appName: organizations.appName }).from(organizations).where(eq(organizations.id, s.orgId));
+  const res = await s.tx.update(organizations).set({ appName: parsed.value }).where(eq(organizations.id, s.orgId)).returning({ appName: organizations.appName });
+  if (!res[0]) throw notFound();
+  await s.tx.insert(auditLogs).values({ orgId: s.orgId, actorUserId: s.userId, action: "org.app_name_change", targetType: "organization", targetId: s.orgId, metadata: { from: before?.appName ?? null, to: parsed.value } });
+  return { appName: appNameOrDefault(res[0].appName), appNameIsDefault: res[0].appName === null };
 }

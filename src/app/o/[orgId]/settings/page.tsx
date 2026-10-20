@@ -55,14 +55,52 @@ function GeneralSettings() {
   if (q.error) return <ErrorNote error={q.error} onRetry={q.reload} />;
   const open = chosen && q.data === chosen.shownWith ? chosen.value : q.data!.registrationOpen;
   return (
-    <section className="card stack" aria-labelledby="h-registration">
-      <h2 id="h-registration">{t("ui.registration_title")}</h2>
-      <label className="row" style={{ gap: "0.5rem" }}>
-        <input type="checkbox" role="switch" checked={open} onChange={(e) => void setOpen(e.target.checked)} />
-        <span>{t("ui.registration_open_label")}</span>
-        <span className="badge" data-state={open ? "open" : "closed"}>{open ? t("ui.registration_state_open") : t("ui.registration_state_closed")}</span>
-      </label>
-      <p className="muted">{open ? t("ui.registration_hint_open") : t("ui.registration_hint_closed")}</p>
+    <>
+      <AppNameSettings />
+      <section className="card stack" aria-labelledby="h-registration">
+        <h2 id="h-registration">{t("ui.registration_title")}</h2>
+        <label className="row" style={{ gap: "0.5rem" }}>
+          <input type="checkbox" role="switch" checked={open} onChange={(e) => void setOpen(e.target.checked)} />
+          <span>{t("ui.registration_open_label")}</span>
+          <span className="badge" data-state={open ? "open" : "closed"}>{open ? t("ui.registration_state_open") : t("ui.registration_state_closed")}</span>
+        </label>
+        <p className="muted">{open ? t("ui.registration_hint_open") : t("ui.registration_hint_closed")}</p>
+      </section>
+    </>
+  );
+}
+
+/** Administrators: the name the product goes by, on the sign-in pages, in titles and menus and in every e-mail (including the sender's name). */
+function AppNameSettings() {
+  const { orgId } = useOrg();
+  const { t, err, setAppName } = useI18n();
+  const toast = useToast();
+  const q = useQuery<{ appName: string; appNameIsDefault: boolean }>(`org-settings:${orgId}`, () => api(`/api/orgs/${orgId}/settings`));
+  const [draft, setDraft] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  async function save(value: string | null) {
+    setBusy(true); setError(undefined);
+    try {
+      const r = await api<{ appName: string }>(`/api/orgs/${orgId}/settings`, { method: "PUT", body: { appName: value } });
+      setAppName(r.appName); setDraft(undefined); q.reload(); toast(t("ui.app_name_saved"));
+    } catch (e) { setError(err(e)); } finally { setBusy(false); }
+  }
+  if (q.loading && !q.data) return <Loading />;
+  if (q.error) return <ErrorNote error={q.error} onRetry={q.reload} />;
+  const shown = draft ?? q.data!.appName;
+  return (
+    <section className="card stack" aria-labelledby="h-app-name">
+      <h2 id="h-app-name">{t("ui.app_name_title")}</h2>
+      <p className="muted">{t("ui.app_name_hint")}</p>
+      <form className="stack" onSubmit={(e) => { e.preventDefault(); void save(shown.trim() === "" ? null : shown); }} noValidate>
+        {error && <Notice kind="error">{error}</Notice>}
+        <Field label={t("ui.app_name_label")}>{(id) => <input id={id} value={shown} maxLength={40} autoComplete="off" onChange={(e) => setDraft(e.target.value)} />}</Field>
+        <div className="row">
+          <Btn type="submit" kind="primary" disabled={busy || draft === undefined || draft === q.data!.appName}>{t("ui.app_name_save")}</Btn>
+          {!q.data!.appNameIsDefault && <Btn type="button" onClick={() => void save(null)} disabled={busy}>{t("ui.app_name_reset")}</Btn>}
+        </div>
+      </form>
     </section>
   );
 }

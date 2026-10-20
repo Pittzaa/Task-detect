@@ -41,9 +41,14 @@ export const organizations = pgTable("organizations", {
   // When automatic e-mail is on: "instant" sends as soon as the background work runs (a server or a paid plan that runs it every minute or faster),
   // "daily" holds the e-mails for 23:00 Thai time (a once-a-day cron such as Vercel Hobby). Ignored while auto_email is off.
   emailSchedule: text("email_schedule").notNull().default("instant"),
+  // The name the product goes by for this organization (sign-in pages, titles, e-mails); null: the default name. See src/domain/app-name.ts.
+  appName: text("app_name"),
   createdAt: createdAt(),
   deletedAt: deletedAt(),
-}, (t) => [check("organizations_email_schedule", sql`${t.emailSchedule} in ('instant', 'daily')`)]);
+}, (t) => [
+  check("organizations_email_schedule", sql`${t.emailSchedule} in ('instant', 'daily')`),
+  check("organizations_app_name_len", sql`${t.appName} is null or char_length(${t.appName}) between 1 and 40`),
+]);
 
 export const users = pgTable(
   "users",

@@ -8,6 +8,8 @@ import type { Db } from "@/db/client";
 import { authAccounts, authRateLimits, authSessions, authTwoFactor, authVerifications, users } from "@/db/schema";
 import type { EmailSender } from "@/integrations/email";
 import { renderEmail } from "@/integrations/email/templates";
+import { DEFAULT_APP_NAME, fromNameFor } from "@/domain/app-name";
+import { installationBrand } from "./brand";
 import { refundRateLimit } from "./rate-limit";
 import { resetKey, verifyKey } from "./auth-throttle";
 import { DEFAULT_LOCALE, isLocale, t, type Locale } from "@/i18n";
@@ -60,7 +62,7 @@ export function cleanProviderName(name: unknown, email: string): string {
 
 export function createAuth(deps: AuthDeps) {
   const { db, email } = deps;
-  const app = t(DEFAULT_LOCALE, "app.name");
+  const app = DEFAULT_APP_NAME; // the TOTP label when a client does not pass its own (the security page passes the current name)
 
   const localeOf = (u: { locale?: unknown }): Locale => (isLocale(u.locale) ? u.locale : DEFAULT_LOCALE);
 
@@ -100,14 +102,16 @@ export function createAuth(deps: AuthDeps) {
       },
       sendResetPassword: async ({ user, url }) => {
         const locale = localeOf(user as { locale?: unknown });
+        const brand = await installationBrand(db); // no organization to ask here: the name of the installation's one organization, or the default
         const { html, text } = renderEmail({
           locale,
+          app: brand,
           heading: t(locale, "email.reset.heading"),
           intro: [t(locale, "email.reset.intro", { name: user.name }), t(locale, "email.reset.ignore")],
           button: { label: t(locale, "email.reset.button"), url },
         });
         try {
-          await email.send({ to: user.email, subject: t(locale, "email.reset.subject", { app }), text, html });
+          await email.send({ to: user.email, fromName: fromNameFor(brand), subject: t(locale, "email.reset.subject", { app: brand }), text, html });
         } catch (e) {
           // nothing was sent, so the allowance is not spent (Better Auth only logs this and still answers 200)
           await refundRateLimit(db, resetKey(user.email)).catch(() => undefined);
@@ -119,14 +123,16 @@ export function createAuth(deps: AuthDeps) {
       sendOnSignUp: true,
       sendVerificationEmail: async ({ user, url }) => {
         const locale = localeOf(user as { locale?: unknown });
+        const brand = await installationBrand(db);
         const { html, text } = renderEmail({
           locale,
+          app: brand,
           heading: t(locale, "email.verify.heading"),
           intro: [t(locale, "email.verify.intro", { name: user.name })],
           button: { label: t(locale, "email.verify.button"), url },
         });
         try {
-          await email.send({ to: user.email, subject: t(locale, "email.verify.subject", { app }), text, html });
+          await email.send({ to: user.email, fromName: fromNameFor(brand), subject: t(locale, "email.verify.subject", { app: brand }), text, html });
         } catch (e) {
           await refundRateLimit(db, verifyKey(user.email)).catch(() => undefined);
           throw e;

@@ -446,7 +446,7 @@ sudo -H -u tasktracker bash -c 'set -a; . /etc/task-tracker/env; set +a; cd /opt
 | `ATTACHMENTS_DIR ... must be an absolute path` หรือ `set either ... not both` | ใส่พาธสั้น หรือตั้งคู่กับ `BLOB_READ_WRITE_TOKEN` | ใช้พาธเต็ม `/var/lib/task-tracker/attachments` และลบ `BLOB_READ_WRITE_TOKEN` |
 | แนบไฟล์ไม่ได้: error / permission denied | โฟลเดอร์ไฟล์แนบไม่ใช่ของ `tasktracker` | `sudo chown -R tasktracker:tasktracker /var/lib/task-tracker && sudo chmod 700 /var/lib/task-tracker/attachments` |
 | แนบไฟล์ใหญ่กว่า 1 MB ไม่ได้ (ใช้ nginx) | `client_max_body_size` เริ่มต้น 1 MB | ตั้งเป็น 5m ตามตัวอย่างด้านบน (Caddy ไม่มีขีดจำกัดนี้) |
-| ไม่มีแจ้งเตือน/อีเมลแจ้งเตือนไม่มา | cron ไม่ทำงาน หรือ `CRON_SECRET` ไม่ตรง | `sudo -H -u tasktracker /usr/local/bin/task-tracker-tick; echo $?` ต้องได้ 0 · ดู `/etc/cron.d/task-tracker` |
+| ไม่มีแจ้งเตือน/อีเมลแจ้งเตือนไม่มา | **สวิตช์ส่งอีเมลอัตโนมัติยังปิดอยู่ (ค่าเริ่มต้น: อีเมลรอผู้ดูแลกดส่ง)** · หรือเลือก "วันละครั้ง 23:00" (บน VPS เลือก "ทันที") · หรือ cron/poller ไม่ทำงาน หรือ `CRON_SECRET` ไม่ตรง | ตั้งค่า → การแจ้งเตือน → เปิดสวิตช์ เลือก "ทันที" · `sudo -H -u tasktracker /usr/local/bin/task-tracker-tick; echo $?` ต้องได้ 0 · ดู `/etc/cron.d/task-tracker` หรือ `journalctl -u task-tracker-poller` |
 | อีเมลยืนยันสมัครไม่มา | Resend: โดเมนยังไม่ verified, `EMAIL_FROM` ไม่ใช่ที่อยู่บนโดเมนนั้น, หรือ API key ผิด | ดูหน้า Logs ใน Resend และ `journalctl -u task-tracker` |
 | ล็อกอินแล้ว "Cross-origin request blocked" (403) | `APP_URL` ไม่ตรงกับโดเมนที่เปิดอยู่ (http/https, www ต่างกัน) | แก้ `APP_URL` ให้ตรงตัวอักษรกับ URL ที่ใช้จริง แล้ว restart |
 | Caddy ขอใบรับรองไม่ได้ | DNS ยังไม่ชี้มา หรือพอร์ต 80 ปิด | `dig +short tasks.example.com` ต้องได้ IP ของ VPS · `sudo ufw status` · `journalctl -u caddy` |

@@ -6,7 +6,7 @@ export const PASSWORD = "correct-horse-battery-9";
 const EMAILS = ".data/e2e/emails.jsonl";
 export const state = () => JSON.parse(readFileSync(".data/e2e/state.json", "utf8")) as { acme: { orgId: string; inviteUrl: string }; globex: { orgId: string; inviteUrl: string } };
 
-interface Mail { to: string; subject: string; text: string; html: string; at: string }
+interface Mail { to: string; subject: string; text: string; html: string; at: string; /** the sender's display name, when the product has a custom name */ from?: string }
 export function mails(): Mail[] {
   try { return readFileSync(EMAILS, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as Mail); } catch { return []; }
 }

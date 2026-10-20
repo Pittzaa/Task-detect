@@ -5,6 +5,8 @@ import { projectScopes } from "@/data/scope";
 import { loadPrincipals } from "@/data/tenant";
 import { digestPeriod, quietHoursEnd } from "@/domain/notifications";
 import { asEmailSchedule, emailRunAllowed } from "@/domain/email-schedule";
+import { fromNameFor } from "@/domain/app-name";
+import { brandOf } from "@/server/brand";
 import { addDays, formatDate } from "@/domain/time";
 import { renderEmail, type Section, type TaskLine } from "@/integrations/email/templates";
 import { EmailError } from "@/integrations/email";
@@ -20,12 +22,12 @@ export const DEADLINE_SEND_HOUR = 9;
 /** Tasks listed in one e-mail; the counts in the subject and in each section title are always the full numbers. */
 export const DEADLINE_MAX_LISTED = 30;
 /** Tasks read per organization, the most recently due first. */
-const PER_ORG_LIMIT = 5000;
+export const PER_ORG_LIMIT = 5000;
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
 type Kind = "overdue" | "today" | "tomorrow";
 interface Item { id: string; title: string; projectName: string; status: string; priority: string; dueDate: string; kind: Kind; daysOver: number }
-interface Plan { userId: string; email: string; name: string; locale: Locale; periodKey: string; items: Item[] }
+interface Plan { userId: string; email: string; name: string; locale: Locale; periodKey: string; items: Item[]; /** the organization's name for the product */ app: string }
 type OrgResult = { retry: boolean; late: boolean; stop: boolean };
 
 const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
@@ -88,7 +90,7 @@ async function deadlineForOrg(ctx: JobContext, orgId: string): Promise<OrgResult
         if (!claimed[0]) return; // already e-mailed for this period
         const mail = compose(ctx, orgId, p);
         try {
-          await ctx.email.send({ to: p.email, subject: mail.subject, text: mail.text, html: mail.html, idempotencyKey: `deadline-${orgId}-${p.userId}-${p.periodKey}` });
+          await ctx.email.send({ to: p.email, fromName: fromNameFor(p.app), subject: mail.subject, text: mail.text, html: mail.html, idempotencyKey: `deadline-${orgId}-${p.userId}-${p.periodKey}` });
         } catch (e) {
           // the provider refuses THIS address (invalid, suppressed): keep the claim, so it is not tried again every hour of the period
           if (e instanceof EmailError && !e.retryable && (e.status === 400 || e.status === 422)) { logger.warn({ orgId }, "deadline e-mail: address refused by the provider"); return; }
@@ -143,6 +145,7 @@ async function collect(tx: Parameters<Parameters<typeof withWorkerOrg>[2]>[0], o
   const wantsSoon = await enabledUsers(tx, orgId, userIds, "email", "task.due_soon");
   const prefs = new Map((await tx.select().from(notificationPrefs).where(and(eq(notificationPrefs.orgId, orgId), inArray(notificationPrefs.userId, userIds)))).map((p) => [p.userId, p]));
 
+  const app = await brandOf(tx, orgId);
   const plans: Plan[] = [];
   for (const [userId, list] of byUser) {
     const profile = profiles.get(userId);
@@ -167,7 +170,7 @@ async function collect(tx: Parameters<Parameters<typeof withWorkerOrg>[2]>[0], o
     }
     if (!items.length) continue;
     items.sort((a, b) => a.dueDate.localeCompare(b.dueDate) || (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9) || a.title.localeCompare(b.title));
-    plans.push({ userId, email: profile.email, name: profile.name, locale: profile.locale, periodKey: `deadline:${period.key}`, items });
+    plans.push({ userId, email: profile.email, name: profile.name, locale: profile.locale, periodKey: `deadline:${period.key}`, items, app });
   }
   if (!plans.length) return plans;
 
@@ -179,9 +182,9 @@ async function collect(tx: Parameters<Parameters<typeof withWorkerOrg>[2]>[0], o
 }
 
 /** The message for one person; exported for tests and the screenshots. */
-export function compose(ctx: Pick<JobContext, "appUrl">, orgId: string, p: Pick<Plan, "locale" | "name" | "items">): { subject: string; text: string; html: string } {
+export function compose(ctx: Pick<JobContext, "appUrl">, orgId: string, p: Pick<Plan, "locale" | "name" | "items" | "app">): { subject: string; text: string; html: string } {
   const l = p.locale;
-  const app = t(l, "app.name");
+  const app = p.app;
   const count = (k: Kind) => p.items.filter((i) => i.kind === k).length;
   const summary = ([["overdue", "deadline.part_overdue"], ["today", "deadline.part_today"], ["tomorrow", "deadline.part_tomorrow"]] as const)
     .filter(([k]) => count(k) > 0)
@@ -212,6 +215,7 @@ export function compose(ctx: Pick<JobContext, "appUrl">, orgId: string, p: Pick<
   ];
   const mail = renderEmail({
     locale: l,
+    app,
     preheader: t(l, "email.deadline.preheader", { summary }),
     heading: t(l, "email.deadline.heading"),
     intro: [t(l, "email.deadline.intro", { name: p.name })],

@@ -9,9 +9,9 @@ function SkipLink() {
   return <a className="skip-link" href="#main">{t("ui.skip")}</a>;
 }
 
-export function Providers({ children, initialLocale }: { children: ReactNode; initialLocale: Locale }) {
+export function Providers({ children, initialLocale, appName }: { children: ReactNode; initialLocale: Locale; appName: string }) {
   return (
-    <I18nProvider initialLocale={initialLocale}>
+    <I18nProvider initialLocale={initialLocale} appName={appName}>
       <ToastProvider>
         <SkipLink />
         {children}

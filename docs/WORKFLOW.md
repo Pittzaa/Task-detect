@@ -61,7 +61,7 @@ Every task has a `version`. Editing sends the version it was loaded with; a stal
 * Rule: daily every *n* days; weekly every *n* weeks on chosen weekdays (Monday-based weeks anchored at the start date); monthly on a day-of-month, **clamped** to the month’s last day (31st → Feb 28/29). Optional end date and maximum count.
 * Occurrences are ordinary tasks linked to the series by `(series_id, occurrence_date)` — a partial unique index makes generation idempotent and race-free. They are created up to **30 days ahead**, topped up hourly, and **never backfilled before today** (creating a series that starts in the past does not create past tasks).
 * Editing: occurrences that are started, done, cancelled or in the past are **never modified or removed**. Future `todo` occurrences follow the series when you tick *also update open tasks in the future*, and are added/removed when the schedule itself changes. Pausing stops generation; resuming resumes from today. Deleting removes only open future occurrences.
-* Dates are calendar dates, so DST never moves them; reminders are computed as 09:00 (or the user’s own preference) in the recipient’s IANA zone, bracketed across DST changes (tested for zones east and west of UTC and across transitions).
+* Dates are calendar dates, so DST never moves them; reminders are computed as a fixed 09:00 in the recipient’s IANA zone (there is no setting for another hour), bracketed across DST changes (tested for zones east and west of UTC and across transitions).
 
 ## Time zones
 

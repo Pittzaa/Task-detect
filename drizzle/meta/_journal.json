@@ -120,6 +120,13 @@
       "when": 1792412320493,
       "tag": "0016_email_schedule",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792461336283,
+      "tag": "0017_app_name",
+      "breakpoints": true
     }
   ]
 }

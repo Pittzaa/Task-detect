@@ -7,6 +7,8 @@ import { renderEmail } from "@/integrations/email/templates";
 import { t } from "@/i18n";
 import { withWorkerOrg } from "../context";
 import { refundRateLimit, takeRateLimit } from "@/server/rate-limit";
+import { fromNameFor } from "@/domain/app-name";
+import { brandOf } from "@/server/brand";
 import { loadProfiles, renderNotification } from "../notify";
 import { Deferred, PermanentFailure, type JobHandler } from "../worker";
 
@@ -39,7 +41,7 @@ export const notificationEmail: JobHandler = async (ctx, job) => {
     }
     const rendered = await renderNotification(tx, orgId, n, profile.locale);
     if (!rendered.visible) return { skip: "no_access" as const };
-    return { send: { to: profile.email, locale: profile.locale, text: rendered.text, taskId: rendered.taskId, userId: n.userId } };
+    return { send: { to: profile.email, locale: profile.locale, text: rendered.text, taskId: rendered.taskId, userId: n.userId, app: await brandOf(tx, orgId) } };
   });
 
   if ("defer" in plan) throw new Deferred(plan.defer!, "quiet_hours");
@@ -49,7 +51,7 @@ export const notificationEmail: JobHandler = async (ctx, job) => {
   }
 
   // 2) Send. Idempotency-Key makes a retry after an ambiguous failure safe at the provider.
-  const { to, locale, text, taskId } = plan.send;
+  const { to, locale, text, taskId, app } = plan.send;
   // a burst (thirty tasks assigned at once) does not become thirty e-mails in an hour; "not now" does not count as a failed try
   const cap = await takeRateLimit(ctx.db, `mail:notify:${plan.send.userId}`, 3600, RECIPIENT_EMAILS_PER_HOUR);
   if (!cap.allowed) throw new Deferred(cap.resetAt, "recipient_hourly_cap");
@@ -57,12 +59,13 @@ export const notificationEmail: JobHandler = async (ctx, job) => {
   try {
     const mail = renderEmail({
       locale,
+      app,
       preheader: text,
       heading: text,
       button: { label: t(locale, "email.notification.button"), url: link },
       footer: [t(locale, "email.notification.footer")],
     });
-    await ctx.email.send({ to, subject: t(locale, "email.notification.subject", { app: t(locale, "app.name"), title: text }), text: mail.text, html: mail.html, idempotencyKey: `notification-${notificationId}` });
+    await ctx.email.send({ to, fromName: fromNameFor(app), subject: t(locale, "email.notification.subject", { app, title: text }), text: mail.text, html: mail.html, idempotencyKey: `notification-${notificationId}` });
   } catch (e) {
     await refundRateLimit(ctx.db, `mail:notify:${plan.send.userId}`).catch(() => undefined); // a failed try does not use up the person's hourly allowance
     await withWorkerOrg(ctx.db, orgId, (tx) => tx.insert(deliveryAttempts).values({ orgId, channel: "email", subjectId: notificationId, status: "failed", detail: e instanceof EmailError ? (e.retryable ? "retryable" : "rejected") : "error" }));

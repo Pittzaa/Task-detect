@@ -23,6 +23,16 @@ Administrators (`org.manage_settings`) have a switch, **Allow new people to sign
 
 Each change is written to the audit log (`org.registration_open` / `org.registration_close`). A side effect to know about: while the switch is off, the sign-up page can only tell “invited” from “not invited”, so someone who tries addresses one by one could learn which addresses have a pending invitation (all sign-up attempts, from everybody together, are limited to 60 per hour while registration is closed; past that the answer is “too many requests” whether or not the address is invited, so addresses cannot be tried one by one, and someone hammering the page can make a person with an invitation wait until the next hour).
 
+### Naming the system (Settings → General)
+
+Administrators (`org.manage_settings`) can give the product their own name instead of “Task Tracker”: **Settings → General → Name of this system**. Leave it empty (or press **Use the default name**) to go back.
+
+* **Where it shows:** the sign-in, sign-up, forgot-password and other pages people see before they sign in (see the note below), the page title in the browser tab, the menu, the calendar events the app creates, the label in an authenticator app for people who switch on two-factor from then on, and **every e-mail the organization sends**: the subject (“[Bluebird] …”), the header and the footer of the message, and the sender's display name (“Bluebird <no-reply@your-domain>”). The address an e-mail comes from does not change; that is `EMAIL_FROM` and its domain, set by whoever runs the server.
+* **Rules:** 1 to 40 characters in any language; letters, numbers, spaces and `. , & ' ( ) + : ! ? _ -`, starting with a letter or a number. Quotes, angle brackets, `@`, emoji and line breaks are refused, because the name ends up in an e-mail header and in the HTML of pages and messages.
+* **One organization or several:** this installation is meant to hold one organization, and then its name is the name of the whole system, including the pages before sign-in and the reset-password and verification e-mails. With several organizations those pages (which belong to no organization) show the default name, and each organization's own name appears inside it and in the e-mails it sends.
+* **Delay:** the page title and the pages before sign-in follow a change within about ten seconds (the server remembers the name that long); the menu follows at once for the administrator who changed it and within five minutes for the others; an e-mail uses the name as it is at the moment it is sent. E-mails already sent keep the old name.
+* Each change is written to the audit log (`org.app_name_change`, with the old and the new name).
+
 ## 2. Structure: departments, teams, projects (Structure)
 
 * **Departments** group teams; **teams** belong to one department; **projects** are the container for tasks.
@@ -80,6 +90,7 @@ Each change is written to the audit log (`org.registration_open` / `org.registra
 ## 5. Notifications and integrations (Settings)
 
 * **Personal notification settings:** per event and channel (in-app, e-mail), daily/weekly digest, quiet hours — evaluated in the person’s own time zone. E-mail defaults to assignments, mentions and due/overdue only.
+* **Sending e-mails** (administrators, Settings → Notifications): three modes. **Off** (the default): e-mails wait until you press **Send waiting e-mails now** (recent ones only: 7 days, 500 a press); no digests. **On, once a day at 23:00 Thai time**: e-mails are held and go out in the 23:00 run (for hosting with one scheduled run a day, such as Vercel Hobby). **On, right away**: as soon as the background work runs (for a server that runs it every minute or every second). Whatever the mode, the bell inside the app always works, and the button sends everything that is waiting or held at once. The same button also sends that day's **deadline e-mail**: one e-mail per person listing their unfinished tasks that are overdue, due today or due tomorrow (at most 30 shown), and nothing for someone who has none.
 * **Discord** (administrators): Settings → Discord → add a webhook URL for **one team or one project**, choose events. The URL is stored encrypted and is never shown again (only a short hint). By default messages are generic (“a task was updated”);
   turning on *include task titles* sends titles to Discord — a privacy decision, shown with a warning. Messages never mention `@everyone`/roles. After repeated failures or when Discord says the webhook is gone, the destination **disables itself** and says why; fix the webhook, then use **Rotate** or re-enable.
 * **Google Calendar** (each person, Settings → Calendar): connect with Google; tasks assigned to you that have dates appear in your calendar. It is **one-way**: edits made in Google do not change tasks, and a task has exactly one event that moves with it. Disconnect removes the link and (if ticked) the events. If the connection shows an error, press *Connect* again.
@@ -105,8 +116,8 @@ Audit log (administrators): who did what and when — sign-ins, role and members
 
 | Symptom | Likely cause |
 |---|---|
-| Nobody receives e-mail | Resend domain not verified / `RESEND_API_KEY` wrong / cron not running (Job health shows pending `notification.email`). |
-| Notifications arrive late | Cron cadence is slower than every minute (plan limit) — see [DEPLOYMENT.md](DEPLOYMENT.md) §0. |
+| Nobody receives notification e-mail | First check **Settings → Notifications → Sending e-mails**: with **Send notification e-mails automatically** off (the default) nothing is sent by itself, so Job health shows no pending job; press **Send waiting e-mails now** or switch it on. With **Once a day at 23:00 Thai time** chosen, e-mails wait for the 23:00 run. Then: Resend domain not verified / `RESEND_API_KEY` wrong / the background work is not running (with the switch on, Job health shows pending `notification.email`). Account e-mails (verification, password reset, invitations) are sent at once whatever the switch says. |
+| Notifications arrive late | Cron cadence is slower than every minute (plan limit), or the schedule is “once a day” — see [DEPLOYMENT.md](DEPLOYMENT.md) §0 and [DEPLOYMENT_TH.md](DEPLOYMENT_TH.md) step 7.4. |
 | “Request access” always says sent but nothing appears | The organization code is wrong (by design the answer is identical); or the person has not verified their e-mail. |
 | “New sign-ups are closed at the moment” | An administrator switched registration off (Settings → General). Invite the person (Members → Invitations) or switch it back on. |
 | `pnpm bootstrap` says the installation already has an organization | By design (one installation, one organization). Use the existing `--slug` to issue a new invitation for the same organization. |

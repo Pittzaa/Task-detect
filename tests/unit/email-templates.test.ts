@@ -20,7 +20,7 @@ describe("safeUrl", () => {
 const EVIL = `<img src=x onerror=alert(1)>"&'`;
 
 describe("renderEmail", () => {
-  const base = { locale: "en" as const, heading: "Hello", intro: ["Some text"], button: { label: "Open", url: "https://app.example/go?a=1&b=2" } };
+  const base = { locale: "en" as const, app: "Task Tracker", heading: "Hello", intro: ["Some text"], button: { label: "Open", url: "https://app.example/go?a=1&b=2" } };
 
   it("is a complete HTML document with a text twin", () => {
     const { html, text } = renderEmail(base);
@@ -42,6 +42,7 @@ describe("renderEmail", () => {
   it("escapes everything a person or a database row supplied, wherever it appears", () => {
     const { html, text } = renderEmail({
       locale: "th",
+      app: EVIL, // the product's name is escaped too (the rules of src/domain/app-name.ts already refuse such a name, but the template does not rely on that)
       preheader: EVIL,
       heading: EVIL,
       intro: [EVIL],
@@ -60,9 +61,19 @@ describe("renderEmail", () => {
   it("drops a link that is not http(s) instead of putting it in an href", () => {
     const { html, text } = renderEmail({ ...base, button: { label: "Open", url: "javascript:alert(1)" }, sections: [{ title: "S", tone: "plain", lines: [{ title: "T", url: "javascript:alert(2)", details: [], due: "d" }] }] });
     expect(html).not.toContain("javascript:");
-    expect(html).not.toContain('class="btn"');
-    expect(text).not.toContain("javascript:alert(1)");
-    expect(html).toContain("T"); // the title is still shown, just not linked
+    expect(html).not.toContain("<a "); // no link at all: not on the button, not on the task line, and no dead "#" placeholder
+    expect(html).not.toContain("Open"); // the button is left out whole, not shown without a destination
+    expect(text).not.toContain("javascript:");
+    expect(text).not.toContain("Open:");
+    expect(html).toContain(">T<"); // the title is still shown, just not linked
+    expect(text).toContain("- T |  | d");
+  });
+
+  it("writes a safe task link the same way in both bodies (normalized), and nothing for an unsafe one", () => {
+    const { html, text } = renderEmail({ ...base, button: undefined, sections: [{ title: "S", tone: "plain", lines: [{ title: "A", url: "https://X.example/a b?x=1&y=2", details: [], due: "d" }, { title: "B", url: "data:text/html,<b>", details: [], due: "d" }] }] });
+    expect(html).toContain('href="https://x.example/a%20b?x=1&amp;y=2"');
+    expect(text).toContain("  https://x.example/a%20b?x=1&y=2");
+    expect(text).not.toContain("data:");
   });
 
   it("lets a very long unbroken title wrap inside the card instead of stretching the message", () => {

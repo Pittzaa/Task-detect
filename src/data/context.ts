@@ -2,6 +2,7 @@ import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { can } from "@/authz/evaluate";
 import type { Permission } from "@/authz/permissions";
 import { auditLogs, memberships, organizations, users } from "@/db/schema";
+import { appNameOrDefault } from "@/domain/app-name";
 import { notFound } from "@/lib/errors";
 import { loadPrincipals, type TenantSession } from "./tenant";
 import { projectScope } from "./scope";
@@ -25,8 +26,9 @@ const UI_FLAGS: Record<string, Permission> = {
 
 /** What the signed-in user may do at organization level. Used only to show or hide controls; the server enforces every action again. */
 export async function getContext(s: TenantSession) {
-  const [org] = await s.tx.select({ id: organizations.id, name: organizations.name }).from(organizations).where(eq(organizations.id, s.orgId));
-  if (!org) throw notFound();
+  const [row] = await s.tx.select({ id: organizations.id, name: organizations.name, appName: organizations.appName }).from(organizations).where(eq(organizations.id, s.orgId));
+  if (!row) throw notFound();
+  const org = { id: row.id, name: row.name, appName: appNameOrDefault(row.appName) };
   const flags = Object.fromEntries(Object.entries(UI_FLAGS).map(([k, p]) => [k, can(s.principal, p, { orgId: s.orgId })]));
   // Scoped roles (a team or project) can create tasks without any organization-wide grant, so this is "anywhere", not "org level".
   const createsSomewhere = s.principal.assignments.some((a) => a.permissions.has("task.create"));

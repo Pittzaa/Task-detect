@@ -7,6 +7,7 @@ import {
 } from "@/db/schema";
 import { AppError, conflict, validation } from "@/lib/errors";
 import { enqueue } from "@/jobs/queue";
+import { installationBrand } from "@/server/brand";
 import { isOrgAdmin, listMyMemberships, lockOrgAdmins, otherOrgAdmins, setCtx, voidInvitationsOf } from "./account";
 import { accessibleProjectIds } from "./scope";
 import { withTenant } from "./tenant";
@@ -51,8 +52,8 @@ export interface MyDataExport {
   organizations: OrgExport[];
 }
 
-const ABOUT =
-  "Personal data held about you by this Task Tracker. Included: your profile, sign-in history, memberships and, for each organization you belong to, the work you created or are assigned to, your comments, attachment records (file names and sizes, not the files), activity and audit entries about your own actions, notifications, settings and saved views. " +
+const about = (app: string) =>
+  `Personal data held about you by this ${app}. Included: your profile, sign-in history, memberships and, for each organization you belong to, the work you created or are assigned to, your comments, attachment records (file names and sizes, not the files), activity and audit entries about your own actions, notifications, settings and saved views. ` +
   "Not included: credentials (password hashes, two-factor secrets, session tokens), other people's data, and work you can no longer open (it is counted). The organization, not you, owns shared work records; see docs/RETENTION.md.";
 
 async function exportOrg(db: Db, userId: string, orgId: string): Promise<OrgExport> {
@@ -189,7 +190,7 @@ export async function exportMyData(db: Db, userId: string, now = new Date()): Pr
   }
   return {
     generatedAt: now.toISOString(),
-    about: ABOUT,
+    about: about(await installationBrand(db)),
     profile: { ...global.u, twoFactorEnabled: undefined },
     signIn: { sessions: global.sessions, providers: [...new Set(global.providers.map((p) => p.providerId))], twoFactorEnabled: !!global.u.twoFactorEnabled },
     memberships: mine.map((m) => ({ organization: m.org?.name ?? null, status: m.status })),

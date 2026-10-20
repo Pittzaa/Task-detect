@@ -1,4 +1,5 @@
 import { appendFile } from "node:fs/promises";
+import { parseAppName } from "@/domain/app-name";
 import { logger } from "@/lib/logger";
 
 export interface EmailMessage {
@@ -10,6 +11,8 @@ export interface EmailMessage {
   html: string;
   /** Sent as an Idempotency-Key so a retried job cannot deliver twice. */
   idempotencyKey?: string;
+  /** The name to show as the sender (the product's name, src/domain/app-name.ts). The address stays the configured one; without it the configured display name is used. */
+  fromName?: string;
 }
 
 export class EmailError extends Error {
@@ -22,6 +25,19 @@ export class EmailError extends Error {
 
 export interface EmailSender {
   send(message: EmailMessage): Promise<void>;
+}
+
+/**
+ * The `from` value for one message: the configured address (EMAIL_FROM, "name <address>" or just "address"), with `fromName` as the display name when
+ * it is a valid product name (otherwise the configured display name, or none). Always a quoted string, so punctuation in a name cannot be misread.
+ */
+export function formatFrom(configured: string, fromName?: string): string {
+  const m = /^(.*)<([^<>]+)>\s*$/.exec(configured.trim());
+  const address = (m ? m[2]! : configured).trim();
+  const configuredName = m ? m[1]!.trim().replace(/^"(.*)"$/, "$1").replace(/["\\\r\n]/g, "") : "";
+  const parsed = fromName === undefined ? null : parseAppName(fromName);
+  const name = parsed && parsed.ok && parsed.value ? parsed.value : configuredName;
+  return name ? `"${name}" <${address}>` : address;
 }
 
 /**
@@ -42,7 +58,7 @@ export function createResendSender(opts: { apiKey: string; from: string; endpoin
             "Content-Type": "application/json",
             ...(m.idempotencyKey ? { "Idempotency-Key": m.idempotencyKey } : {}),
           },
-          body: JSON.stringify({ from: opts.from, to: [m.to], subject: m.subject, text: m.text, html: m.html }),
+          body: JSON.stringify({ from: formatFrom(opts.from, m.fromName), to: [m.to], subject: m.subject, text: m.text, html: m.html }),
           signal: AbortSignal.timeout(10_000),
         });
       } catch {
@@ -88,7 +104,7 @@ export function createCaptureSender() {
 export function createFileSender(path: string): EmailSender {
   return {
     async send(m) {
-      await appendFile(path, JSON.stringify({ to: m.to, subject: m.subject, text: m.text, html: m.html, at: new Date().toISOString() }) + "\n");
+      await appendFile(path, JSON.stringify({ to: m.to, from: m.fromName, subject: m.subject, text: m.text, html: m.html, at: new Date().toISOString() }) + "\n");
     },
   };
 }

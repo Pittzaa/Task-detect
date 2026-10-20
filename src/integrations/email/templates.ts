@@ -46,6 +46,8 @@ const countOf = (s: Section) => (s.total !== undefined && s.total > s.lines.leng
 
 export interface Layout {
   locale: Locale;
+  /** The product's name for this message (src/domain/app-name.ts): the header line and the "sent automatically by ..." footer. Required, so a caller cannot forget it. */
+  app: string;
   /** The inbox preview line, not shown in the body. */
   preheader?: string;
   heading: string;
@@ -97,7 +99,7 @@ ${s.lines.map((l) => taskLine(l, s.tone)).join("\n")}
 
 /** The HTML and plain-text bodies of one message. */
 export function renderEmail(l: Layout): { html: string; text: string } {
-  const app = t(l.locale, "app.name");
+  const app = l.app;
   const button = l.button && safeUrl(l.button.url) ? { label: l.button.label, url: safeUrl(l.button.url)! } : null;
 
   const body: string[] = [];
@@ -139,7 +141,11 @@ ${body.join("\n")}
   for (const s of l.sections ?? []) {
     if (!s.lines.length) continue;
     text.push(`${s.title} (${countOf(s)})`);
-    for (const x of s.lines) text.push(`- ${x.title} | ${x.details.filter(Boolean).join(" | ")} | ${x.due}`, `  ${x.url}`);
+    for (const x of s.lines) {
+      text.push(`- ${x.title} | ${x.details.filter(Boolean).join(" | ")} | ${x.due}`);
+      const url = safeUrl(x.url); // the plain-text twin follows the same rule as the HTML: an unsafe address is left out, a safe one is written as normalized
+      if (url) text.push(`  ${url}`);
+    }
     text.push("");
   }
   for (const x of l.list ?? []) text.push(`- ${x}`);

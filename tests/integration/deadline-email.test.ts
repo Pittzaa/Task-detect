@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { withTenant } from "@/data/tenant";
 import { createTask } from "@/data/tasks";
 import { setProjectTeams } from "@/data/structure";
@@ -7,7 +7,7 @@ import { updateSettings } from "@/data/notifications";
 import { setAutoEmail } from "@/data/org-settings";
 import { digestLog, notificationPrefs, projects, tasks, users, memberships } from "@/db/schema";
 import { EmailError, createCaptureSender } from "@/integrations/email";
-import { DEADLINE_MAX_LISTED, deadlineEmail } from "@/jobs/handlers/deadline";
+import { DEADLINE_MAX_LISTED, PER_ORG_LIMIT, deadlineEmail } from "@/jobs/handlers/deadline";
 import type { JobRow } from "@/jobs/queue";
 import { addMember, connect, makeOrg, makeUser } from "./helpers";
 import { makeJobCtx } from "./jobs-helpers";
@@ -149,6 +149,31 @@ describe("who is e-mailed, and what is in it", () => {
       expect(mailsTo(later.email, "eve")[0]!.html).toContain("In a deleted project");
     } finally {
       await withTenant(c.app, { userId: u.boss!.id, orgId: O.org.id }, (s) => setProjectTeams(s, hidden, []));
+    }
+  });
+
+  it("a task in a project that is still there but that the person's team may not read is left out; the same task is listed once the team may read it", async () => {
+    const [live] = await c.admin.insert(projects).values({ orgId: O.org.id, name: "Closed Live Project" }).returning({ id: projects.id });
+    const closed = await as("mgr", (s) => createTask(s, { projectId: live!.id, title: "In a live project the team may not read", dueDate: "2026-07-01" }));
+    await c.admin.update(tasks).set({ primaryAssigneeId: u.scoped!.id }).where(eq(tasks.id, closed.id));
+    await mk("Control: in a project the team may read", "2026-07-01", { primaryAssigneeId: u.scoped!.id });
+    const first = run({ now: new Date("2026-07-20T03:00:00Z") });
+    await deadlineEmail(first.ctx, job);
+    const one = mailsTo(first.email, "scoped");
+    expect(one).toHaveLength(1);
+    expect(one[0]!.html).toContain("Control: in a project the team may read"); // so the e-mail was made, and the other task is absent for the one reason that matters
+    expect(one[0]!.html).not.toContain("a live project the team may not read");
+    // the project is opened to the team (it was never deleted): another day, a new period
+    await withTenant(c.app, { userId: u.boss!.id, orgId: O.org.id }, (s) => setProjectTeams(s, live!.id, [O.team.id]));
+    try {
+      const second = run({ now: new Date("2026-07-21T03:00:00Z") });
+      await deadlineEmail(second.ctx, job);
+      const two = mailsTo(second.email, "scoped");
+      expect(two).toHaveLength(1);
+      expect(two[0]!.html).toContain("In a live project the team may not read");
+      expect(two[0]!.html).toContain("Control: in a project the team may read");
+    } finally {
+      await withTenant(c.app, { userId: u.boss!.id, orgId: O.org.id }, (s) => setProjectTeams(s, live!.id, []));
     }
   });
 
@@ -422,6 +447,31 @@ describe("running out of time", () => {
   });
 });
 
+describe("running out of time, with people already served at the head of the list", () => {
+  it("a run that is already past its deadline still reaches the person who has not been served: the served are filtered out before they can use up its one slot", async () => {
+    const L = await makeOrg(c.admin, "LateOrg", { autoEmail: true });
+    const mgr = await makeUser(c.admin, "latemgr");
+    await addMember(c.admin, L.org.id, mgr.id, { role: "manager" });
+    const people: { id: string; email: string }[] = [];
+    for (let i = 0; i < 3; i++) {
+      const p = await makeUser(c.admin, `late${i}`);
+      await c.admin.update(users).set({ locale: "en", timezone: "Asia/Bangkok" }).where(eq(users.id, p.id));
+      await addMember(c.admin, L.org.id, p.id, { role: "member" });
+      people.push(p);
+    }
+    // the first two have the more recent tasks, so they come first; they were served for this period already
+    for (const [i, due] of [[0, "2026-08-18"], [1, "2026-08-17"], [2, "2026-08-10"]] as const) {
+      const t = await withTenant(c.app, { userId: mgr.id, orgId: L.org.id }, (s) => createTask(s, { projectId: L.project.id, title: `Late task ${i}`, dueDate: due }));
+      await c.admin.update(tasks).set({ primaryAssigneeId: people[i]!.id }).where(eq(tasks.id, t.id));
+    }
+    for (const served of people.slice(0, 2)) await c.admin.insert(digestLog).values({ orgId: L.org.id, userId: served.id, periodKey: "deadline:daily:2026-08-20" });
+    const { ctx, email } = run({ now: new Date("2026-08-20T03:00:00Z") });
+    ctx.deadline = Date.now() - 1000;
+    await deadlineEmail(ctx, manualJob(L.org.id)).catch(() => undefined); // "not now" is allowed to say so; what matters is who was e-mailed
+    expect(email.sent.map((m) => m.to)).toEqual([people[2]!.email]);
+  });
+});
+
 describe("one picture a day: what is sent and what is claimed are the same day", () => {
   it("a frequent scheduler sends nothing between midnight and 09:00 and exactly one e-mail from 09:00, and a task that only just came into range is not announced twice", async () => {
     const who = await makeUser(c.admin, "hourly");
@@ -468,19 +518,35 @@ describe("which tasks are listed when there are more than fit", () => {
     expect(mail.html).toContain("Due right now");
     expect(mail.html).toContain("Due next");
     expect((mail.html.match(/Old \d\d/g) ?? []).length).toBe(DEADLINE_MAX_LISTED - 2);
+    // and WHICH ones: the most recently overdue (latest due date first), not the oldest
+    const all = Array.from({ length: DEADLINE_MAX_LISTED + 5 }, (_, i) => ({ title: `Old ${String(i).padStart(2, "0")}`, due: `2027-04-${String(1 + (i % 9)).padStart(2, "0")}` }));
+    const expected = [...all].sort((a, b) => b.due.localeCompare(a.due) || a.title.localeCompare(b.title)).slice(0, DEADLINE_MAX_LISTED - 2).map((x) => x.title).sort();
+    expect([...new Set(mail.html.match(/Old \d\d/g) ?? [])].sort()).toEqual(expected);
     expect(mail.html).toContain(`Overdue (${DEADLINE_MAX_LISTED - 2} / ${DEADLINE_MAX_LISTED + 5})`);
     expect(mail.html).toContain("Due today (1)");
     expect(mail.html).toContain("…and 7 more");
     expect(mail.subject).toContain(`${DEADLINE_MAX_LISTED + 5} overdue, 1 due today, 1 due tomorrow`);
   });
 
-  it("the most recent of a huge backlog is read, not the oldest: the query cap cannot push out what is due now", async () => {
-    // (the cap is 5000 tasks per organization, most recently due first; this checks the order of the query by a small stand-in)
-    const { compose } = await import("@/jobs/handlers/deadline");
-    const items = Array.from({ length: 40 }, (_, i) => ({ id: `t${i}`, title: `Task ${i}`, projectName: "P", status: "todo", priority: "medium", dueDate: `2027-01-${String(1 + (i % 28)).padStart(2, "0")}`, kind: "overdue" as const, daysOver: 10 + i }));
-    items.push({ id: "now", title: "Right now", projectName: "P", status: "todo", priority: "low", dueDate: "2027-05-10", kind: "today" as never, daysOver: 0 });
-    const mail = compose({ appUrl: "https://x.example" }, "o", { locale: "en", name: "N", items });
-    expect(mail.html).toContain("Right now");
+  it("a backlog larger than the query cap: what is due now is still read and listed, only the longest overdue are cut", async () => {
+    const B = await makeOrg(c.admin, "CapOrg", { autoEmail: true });
+    const mgr = await makeUser(c.admin, "capmgr");
+    const who = await makeUser(c.admin, "capper");
+    await c.admin.update(users).set({ locale: "en", timezone: "Asia/Bangkok" }).where(eq(users.id, who.id));
+    await addMember(c.admin, B.org.id, mgr.id, { role: "manager" });
+    await addMember(c.admin, B.org.id, who.id, { role: "member" });
+    // PER_ORG_LIMIT + 3 overdue tasks (no two the same day for long, the oldest ones first to be cut) and one due today
+    await c.admin.execute(sql`
+      insert into tasks (org_id, project_id, title, due_date, primary_assignee_id, created_by)
+      select ${B.org.id}::uuid, ${B.project.id}::uuid, 'Backlog ' || g, (date '2026-09-01' - (g % 700)), ${who.id}::uuid, ${mgr.id}::uuid
+      from generate_series(1, ${PER_ORG_LIMIT + 3}) g`);
+    await c.admin.execute(sql`insert into tasks (org_id, project_id, title, due_date, primary_assignee_id, created_by) values (${B.org.id}::uuid, ${B.project.id}::uuid, 'Due right now, behind a huge backlog', date '2026-09-10', ${who.id}::uuid, ${mgr.id}::uuid)`);
+    const { ctx, email } = run({ now: new Date("2026-09-10T03:00:00Z") });
+    await deadlineEmail(ctx, manualJob(B.org.id));
+    const mail = email.sent.find((m) => m.to === who.email)!;
+    expect(mail.html).toContain("Due right now, behind a huge backlog");
+    expect(mail.html).toContain("Due today (1)");
+    expect(mail.html).toContain(`Overdue (${DEADLINE_MAX_LISTED - 1} / ${PER_ORG_LIMIT - 1})`); // the query took the 5000 most recently due: the one due today and 4999 overdue
   });
 });
 

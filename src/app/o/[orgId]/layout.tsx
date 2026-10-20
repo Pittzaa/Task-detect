@@ -14,7 +14,7 @@ export default function OrgLayout({ children }: { children: ReactNode }) {
   const { orgId } = useParams<{ orgId: string }>();
   const router = useRouter();
   const pathname = usePathname();
-  const { t, locale, setLocale, applyLocale, setTimezone } = useI18n();
+  const { t, locale, setLocale, applyLocale, setTimezone, setAppName } = useI18n();
   const [openedOn, setOpenedOn] = useState<string | null>(null);
   const open = openedOn === pathname; // opening is tied to the current page, so navigating closes the menu
   const setOpen = (v: boolean) => setOpenedOn(v ? pathname : null);
@@ -23,6 +23,8 @@ export default function OrgLayout({ children }: { children: ReactNode }) {
   useEffect(() => { if (ctx.error?.status === 401) router.replace(`/login?next=${encodeURIComponent(pathname)}`); }, [ctx.error, router, pathname]);
   const profileLocale = ctx.data?.user.locale;
   useEffect(() => { if (profileLocale) applyLocale(profileLocale); }, [profileLocale, applyLocale]);
+  const orgAppName = ctx.data?.org.appName;
+  useEffect(() => { if (orgAppName) setAppName(orgAppName); }, [orgAppName, setAppName]);
   const profileZone = ctx.data?.user.timezone;
   useEffect(() => { if (profileZone) setTimezone(profileZone); }, [profileZone, setTimezone]);
 

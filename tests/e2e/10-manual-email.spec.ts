@@ -1,10 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
+import pg from "pg";
 import { expectAccessible, login, mails, preferEnglish, state, waitMail } from "./helpers";
 
 /**
  * How every organization starts, and what fits Vercel Hobby (automatic e-mail OFF, no per-minute scheduler): the bell fills by itself
  * because the background work also runs when people use the app, no notification e-mail leaves until an administrator sends the waiting
  * ones, only an administrator is offered the switch and the button, and switching automatic e-mail on makes e-mails go out by themselves.
+ * It expects the fresh database a full `pnpm test:e2e` starts from: with E2E_KEEP_DB=1 on the same calendar day Sam's deadline e-mail for the day
+ * has already been sent (that is the once-a-day rule working), so the deadline checks below would wait for an e-mail that rightly never comes.
  */
 test.describe.configure({ mode: "serial" });
 test.beforeEach(async ({ page }) => { await preferEnglish(page); });
@@ -13,6 +16,12 @@ const acme = () => state().acme.orgId;
 const ORIGIN = "http://localhost:3100";
 const TITLE = "Manual mail task";
 const post = (page: Page, path: string, data: unknown) => page.request.post(path, { data, headers: { origin: ORIGIN } });
+const SUPERUSER = process.env.E2E_DB_SUPERUSER_URL ?? "postgres://postgres@127.0.0.1:54329/tasktracker_e2e";
+async function deadlineClaims(email: string) {
+  const c = new pg.Client({ connectionString: SUPERUSER });
+  await c.connect();
+  try { return Number((await c.query(`select count(*) as n from digest_log d join users u on u.id = d.user_id where u.email = $1 and d.period_key like 'deadline:%'`, [email])).rows[0].n); } finally { await c.end(); }
+}
 const waiting = async (page: Page) => ((await (await page.request.get(`/api/orgs/${acme()}/notification-emails`)).json()) as { waiting: number });
 
 test("the bell shows an assignment by itself, and no e-mail about it is sent", async ({ page, browser }) => {
@@ -71,12 +80,15 @@ test("an administrator sees what is waiting and sends it; the person gets the e-
   expect(mails().slice(before).filter((m) => m.to === "sam@e2e.test" && /Your unfinished tasks|งานที่ยังไม่เสร็จของคุณ/.test(m.text))).toHaveLength(1); // one, not one per task
 
   await expect.poll(async () => (await waiting(page)).waiting, { timeout: 20_000 }).toBe(0);
-  // pressing again the same day sends no second deadline e-mail
+  // pressing again the same day sends no second deadline e-mail. (A press in the same minute queues no second job at all, so the proof that the
+  // once-a-day rule is what holds is the claim recorded for Sam's period: one row, and it stays one.)
+  expect(await deadlineClaims("sam@e2e.test")).toBe(1);
   const again = mails().length;
   await section.getByRole("button", { name: "Send waiting e-mails now" }).click();
   await expect(page.getByText(/e-mail\(s\) are being sent/).first()).toBeVisible();
   await page.waitForTimeout(4000);
   expect(mails().slice(again).filter((m) => m.to === "sam@e2e.test" && /Your unfinished tasks|งานที่ยังไม่เสร็จของคุณ/.test(m.text))).toHaveLength(0);
+  expect(await deadlineClaims("sam@e2e.test")).toBe(1);
 });
 
 test("a member sees the explanation but no button, the digests are switched off, and the API refuses them", async ({ page }) => {

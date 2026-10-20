@@ -3,7 +3,7 @@
  * it with the database, so a deployment that went out before `pnpm db:migrate` is reported instead of failing on first
  * use. A unit test keeps this number equal to the journal.
  */
-export const EXPECTED_MIGRATIONS = 17;
+export const EXPECTED_MIGRATIONS = 18;
 
 /**
  * How the readiness check judges the database. A database BEHIND this build is a failure (the code would meet tables or columns that

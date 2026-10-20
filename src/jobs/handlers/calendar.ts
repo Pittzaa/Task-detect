@@ -1,3 +1,4 @@
+import { brandOf } from "@/server/brand";
 import { taskLink } from "@/lib/links";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import type { Tx } from "@/db/client";
@@ -37,7 +38,7 @@ export async function desiredEvent(tx: Tx, ctx: JobContext, conn: Conn, task: Ta
   const locale = profile?.locale ?? DEFAULT_LOCALE;
   const url = taskLink(ctx.appUrl, conn.orgId, task.id);
   const body = buildEventBody({
-    title: task.title, startDate: task.startDate, dueDate: task.dueDate, done: task.status === "done", url, appName: t(locale, "app.name"),
+    title: task.title, startDate: task.startDate, dueDate: task.dueDate, done: task.status === "done", url, appName: await brandOf(tx, conn.orgId),
     description: `${t(locale, "ui.status")}: ${t(locale, `status.${task.status}` as never)} · ${t(locale, "ui.priority")}: ${t(locale, `priority.${task.priority}` as never)}\n${url}`,
   });
   return { body, hash: payloadHash(body) };

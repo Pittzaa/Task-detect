@@ -12,7 +12,7 @@ interface SessionRow { token: string; id: string; userAgent?: string | null; ipA
 interface SessionInfo { session: { token: string }; user: { twoFactorEnabled?: boolean | null } }
 
 export default function SecurityPage() {
-  const { t, err, locale, setTimezone } = useI18n();
+  const { t, err, locale, setTimezone, appName } = useI18n();
   const router = useRouter();
   const toast = useToast();
   const me = useQuery("me", () => api<{ name: string; email: string; locale: "th" | "en"; timezone: string }>("/api/me"));
@@ -31,7 +31,7 @@ export default function SecurityPage() {
   async function startEnrol(e: React.FormEvent) {
     e.preventDefault(); setMsg(undefined);
     try {
-      const r = await authApi<{ totpURI: string; backupCodes: string[] }>("/two-factor/enable", { password });
+      const r = await authApi<{ totpURI: string; backupCodes: string[] }>("/two-factor/enable", { password, issuer: appName });
       setEnrol({ uri: r.totpURI, codes: r.backupCodes, qr: await QRCode.toDataURL(r.totpURI, { margin: 1, width: 200 }) });
       setPassword("");
     } catch (e2) { setMsg({ kind: "error", text: err(e2) }); }
